@@ -1,77 +1,173 @@
 # Fantasy Football Server/Client (FFB)
 
-FFB is the Fantasy Football software used by [FUMBBL](https://fumbbl.com)
+FFB is the Fantasy Football software used by [FUMBBL](https://fumbbl.com).
 
-Client and server are both implemented using Jav8 with Swing/AWT.
+Client and server are both implemented in Java 8 with Swing/AWT.
 
-# Module structure
+---
 
-## ffb-common
+## Quick Start (local game)
 
-As the name suggests, this is the base dependency for both applications containing the most basic classes.
+```bash
+./play.sh                # Two human clients, each gets a login window
+./play.sh --ai           # One human client (Kalimar) + AI opponent (BattleLore)
+./play-ai-vs-ai.sh       # Fully headless AI-vs-AI game, no windows
+```
 
-## ffb-server
+**Prerequisites (one-time):** MariaDB and Maven via Homebrew. `play.sh` handles
+everything else (build, DB creation, schema init, server start).
 
-Server component providing a websocket endpoint for clients to connect. Commands by the client are stored in queues.
+In each human client window enter:
+- Game name: `LocalGame`
+- Password: `test`
+- Click **Create**, then pick a team.
 
-Game sequences are implemented in Step classes that reside on a stack. The top step will receive commands from the queue
-and ideally processes them, publishing data to other steps on the stack and either waits for other commands or causes
-the stack to be processed further.
+The game starts when both coaches have chosen a team.
 
-Changes to the field model and game data will be published to clients using similar commands.
+---
 
-## ffb-client-logic
+## Module Structure
 
-This currently contains 99,9% of the client code but in the future this should only contain device and presentation
-agnostic aspects.
+| Module | Description |
+|---|---|
+| **ffb-common** | Shared entities, rules, skills, injuries, network commands, field coordinates, dice. Rule-version sub-packages: `bb2016/`, `bb2020/`, `bb2025/`. |
+| **ffb-tools** | Build-time utilities (icon folder rebuilding, etc.). |
+| **ffb-server** | Jetty WebSocket server. Manages game state (`GameState`, `GameCache`), MySQL/MariaDB persistence, 40+ command handlers. Requires `server.ini`. |
+| **ffb-client-logic** | Platform-agnostic client logic: server command processing, game-phase state machines, 150+ dialog handlers. Uses Tyrus WebSocket client. |
+| **ffb-client** | AWT/Swing UI layer. Layer-based field rendering, `UserInterface`, `IconCache`, `ActionKeyBindings`. |
+| **ffb-resources** | Packaged sound and icon assets JAR. |
+| **ffb-ai** | Headless AI agent. Extends the client, suppresses the UI window, and drives every game decision programmatically (random strategy). |
 
-Similar to the server commands are enqueued and processed one by one. Usually these are changes like player positions or
-states and turn modes.
+---
 
-Input events like mouse clicks and keyboard input are processed by ClientState classes which are specialized depending
-on the current game phase, e.g. a player is moving, teams are setting up or some out of turn sequences.
+## Build Commands
 
-Quite a few third party classes for websockets or json handling are repackaged in this module to keep the jar file small
-instead of adding bloated dependencies. Though there are also some actual dependencies related to sound and reflection.
+```bash
+mvn clean install            # Full build of all modules
+mvn install -DskipTests      # Build without tests
+mvn test                     # All tests
+mvn test -Dtest=ClassName    # Single test class
+mvn -pl ffb-server test      # Tests for one module only
+```
 
-## ffb-client
+---
 
-For now this only contains the client's main class but should at one point hold all AWT/Swing related classes and logic
-concerning desktop applications only.
+## Architecture Summary
 
-## ffb-resources
+### Server
 
-Separate artifact for sound and icon files.
+Entry point: `com.fumbbl.ffb.server.FantasyFootballServer`
 
-## ffb-tools
+Game sequences are `Step` classes pushed onto a stack. The top step receives
+commands from a queue and either processes them (advancing the stack) or waits
+for further input. Field-model and game-data changes are published back to
+clients as serialized command objects.
 
-Small utility classes needed to e.g. rebuild the icon folder of [ffb-resources](ffb-resources)
+| Argument | Description |
+|---|---|
+| `[mode]` | `standalone` (local), `fumbbl` (production), `standaloneInitDb` / `fumbblInitDb` (schema setup) |
+| `-inifile [filepath]` | Path to server config (`ffb-server/server.ini`). |
+| `-override [filepath]` | Environment-specific overrides; same syntax as `inifile`. |
 
-# Start up
+Requires MySQL ≤ 5.6 or MariaDB ≤ 10.4 (connector 5.1.27).
 
-## Server
+### Client
 
-The main class is `com.fumbbl.ffb.server.FantasyFootballServer`
+Entry point: `com.fumbbl.ffb.client.FantasyFootballClientAwt`
 
-| Arguments            | Description                                                                                                                                                                 |
-|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [mode]               | * standalone - you usually want this <br/> * fumbbl - used in test and live environments on fumbbl<br/> * standaloneInitDb/fumbblInitDb - used to setup the database schema |
-| -inifile [filepath]  | Path to server config file, [server.ini](ffb-server/server.ini) can be used as a template                                                                                   |
-| -override [filepath] | Path to an override file supporting the same syntax and values as `inifile`. This allows to use a base ini file and apply environment specific overrides                    |
+Commands from the server are enqueued and processed one-by-one. Mouse and
+keyboard events are handled by `ClientState` subclasses that specialize
+behaviour for each game phase (movement, setup, out-of-turn sequences, etc.).
 
-The server requires a database (connection data has to be defined in ini files), currently mysql up to 5.6 or mariadb up to 10.4. are supported by the used mysql-connector lib (5.1.27).
+| Argument | Description |
+|---|---|
+| `[mode]` | `-player`, `-spectator`, or `-replay` |
+| `-server [hostname]` | Hostname of the server to connect to |
+| `-port [port]` | WebSocket port as defined in server config |
+| `-coach [coachname]` | Coach name used to log in |
+| `-auth [hexstring]` | Pre-encoded login credential (bypasses dialog) |
+| `-teamid [teamid]` | ID of a locally stored team (player mode only) |
+| `-gameId [gameId]` | Numeric game ID (replay mode only) |
 
-## Client
+### Communication
 
-The main class is `com.fumbbl.ffb.client.FantasyFootballClientAwt`
+Clients and server exchange serialized `NetCommand` objects defined in
+`ffb-common/net/commands/`. Each side maintains a command queue; commands are
+processed sequentially to keep state consistent.
 
-| Arguments            | Description                                                                                                                                                                                                                           |
-|----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [mode]               | * -player - start client as player <br/> * -spectator - to join as specatator <br/> * -replay - to load replay data                                                                                                                   |
-| -server [hostname]   | Hostname of the server to connect to, e.g. `localhost`                                                                                                                                                                                |
-| -port [port]         | Websocket port as defined in server config                                                                                                                                                                                            |
-| -coach [coachname]   | Name of the coach used to log in                                                                                                                                                                                                      |
-| -teamid [teamid]     | Id of a locally stored team as defined in the [team's xml](ffb-server/teams) - only required for player mode                                                                                                                          |
-| -teamName [teamName] | Name of the team defined by -teamId, can also be taken from the xml                                                                                                                                                                   |
-| -auth [hexstring]    | Log in information, optional. If ommitted you can log in via the client dialog but we recommend to use auth data. For ease of development you can simply add a string into the coach table in the database and use that as auth info. |
-| -gameId [gameId]     | Numeric game id as stored in the data base - only required for replay mode                                                                                                                                                            |
+### Rule Versions
+
+`FactoryManager` selects rule-specific implementations for skills, injuries, and
+modifiers. Sub-packages `bb2016/`, `bb2020/`, `bb2025/` contain the
+version-specific classes. The local server is configured to run **BB2025** rules.
+
+---
+
+## AI Agent (`ffb-ai`)
+
+The `ffb-ai` module provides a headless AI client that can play a full game
+without any human interaction or visible UI.
+
+### Entry Point
+
+```
+com.fumbbl.ffb.ai.AiMain
+  -coach     <coachname>    Coach name (must exist in the DB)
+  -password  <password>     Plain-text password
+  -server    <hostname>     Server hostname (default: localhost)
+  -port      <port>         Server port (default: 22227)
+  -home                     Pass this flag for the home-side player
+```
+
+### Key Classes
+
+| Class | Role |
+|---|---|
+| `AiClient` | Extends `FantasyFootballClientAwt`, hides the UI window, starts `AiDecisionEngine` as a daemon thread. |
+| `AiDecisionEngine` | Polls every 100 ms. Handles login (via reflection into `LoginLogicModule`), responds to server dialogs, and drives active-state actions. |
+| `RandomStrategy` | Stateless helper — maps every `IDialogParameter` type to a valid (randomly chosen) response sent via `ClientCommunication`. |
+| `GameSimulator` | Clones a `Game` state via JSON round-trip for forward-search planning (foundation; search not yet implemented). |
+
+### Running AI Games
+
+```bash
+# Human vs AI
+./play.sh --ai
+
+# AI vs AI (fully headless)
+./play-ai-vs-ai.sh
+# Logs: /tmp/ffb-ai-kalimar.log, /tmp/ffb-ai-battlelore.log, /tmp/ffb-server.log
+```
+
+---
+
+## Headless Simulation (`ffb-ai/simulation`)
+
+The simulation package provides a fully in-memory game engine — no network, no database,
+no Swing window. A complete game runs in ~9 ms.
+
+### Key Classes
+
+| Class | Role |
+|---|---|
+| `SimulationLoop` | Drives a `GameState` to completion by injecting commands directly into the server-side step stack. Synchronous; no threads or polling delays. Safety cap: 100 000 iterations. |
+| `HeadlessGameSetup` | Constructs a fully-initialised `GameState` from XML rosters — mirrors `ServerCommandHandlerJoinApproved`, no DB required. |
+| `HeadlessFantasyFootballServer` | Minimal server stub: all network and persistence calls are no-ops. Uses sentinel sessions to distinguish home vs. away. |
+| `GameSimulator` | Clones a `Game` via JSON round-trip — foundation for forward-search planning (search not yet implemented). |
+| `CapturingClientCommunication` | Intercepts dialog responses from `RandomStrategy` and converts them to server-side `ReceivedCommand` objects instead of sending them over the network. |
+| `SimulationBenchmark` | Runs N complete games (default 20) and reports per-step CPU-time breakdowns. |
+
+### Running the benchmark
+
+```bash
+java -cp "ffb-ai/target/ffb-ai-*.jar:ffb-server/target/lib/*" \
+     com.fumbbl.ffb.ai.simulation.SimulationBenchmark .
+```
+
+Output includes per-game setup/kickoff/drive timing, per-turn microseconds, and the
+top-20 hottest steps by accumulated CPU time.
+
+### Extending the AI
+
+Replace `RandomStrategy` with your own implementation to plug in a smarter decision engine.
+`GameSimulator` is the scaffolding for forward-search (MCTS, minimax, etc.).

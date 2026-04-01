@@ -21,6 +21,7 @@
         <module>ffb-client</module>
         <module>ffb-client-logic</module>
         <module>ffb-resources</module>
+        <module>ffb-ai</module>
     </modules>
     <dependencyManagement>
         <dependencies>

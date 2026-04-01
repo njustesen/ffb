@@ -66,8 +66,8 @@
 		<agility>2</agility>
 		<passing>6</passing>
 		<armour>9</armour>
-		<portrait>portraits/chaosdwarf_bullcentaur.png</portrait>
-		<iconSet size="2">iconsets/chaosdwarf_bullcentaur.png</iconSet>
+		<portrait>portraits/chaosdwarf_bullcentaurblitzer.png</portrait>
+		<iconSet size="2">iconsets/chaosdwarf_bullcentaurblitzer.png</iconSet>
 		<skillList>
 			<skill>Sprint</skill>
 			<skill>Sure Feet</skill>
@@ -91,8 +91,8 @@
 		<agility>2</agility>
 		<passing>0</passing>
 		<armour>8</armour>
-		<portrait>portraits/chaosdwarf_minotaur.png</portrait>
-		<iconSet size="1">iconsets/chaosdwarf_minotaur.png</iconSet>
+		<portrait>portraits/chaosdwarf_enslavedminotaur.png</portrait>
+		<iconSet size="1">iconsets/chaosdwarf_enslavedminotaur.png</iconSet>
 		<skillList>
 			<skill>Loner</skill>
 			<skill>Frenzy</skill>

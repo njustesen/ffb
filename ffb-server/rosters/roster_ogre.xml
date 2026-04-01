@@ -19,8 +19,8 @@
 		<agility>3</agility>
 		<passing>5</passing>
 		<armour>5</armour>
-		<portrait>portraits/ogre_snotling.png</portrait>
-		<iconSet size="12">iconsets/ogre_snotling.png</iconSet>
+		<portrait>portraits/ogre_gnoblarlineman.png</portrait>
+		<iconSet size="12">iconsets/ogre_gnoblarlineman.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 			<skill>Right Stuff</skill>

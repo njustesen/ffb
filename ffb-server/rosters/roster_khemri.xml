@@ -21,8 +21,8 @@
 		<agility>1</agility>
 		<passing>0</passing>
 		<armour>9</armour>
-		<portrait>portraits/khemri_tombguardian.png</portrait>
-		<iconSet size="4">iconsets/khemri_tombguardian.png</iconSet>
+		<portrait>portraits/tombkings_tombguardian.png</portrait>
+		<iconSet size="4">iconsets/tombkings_tombguardian.png</iconSet>
 		<skillList>
 			<skill>Decay</skill>
 			<skill>Regeneration</skill>
@@ -94,8 +94,8 @@
 		<agility>2</agility>
 		<passing>6</passing>
 		<armour>7</armour>
-		<portrait>portraits/khemri_skeleton.png</portrait>
-		<iconSet size="4">iconsets/khemri_skeleton.png</iconSet>
+		<portrait>portraits/tombkings_skeletonlineman.png</portrait>
+		<iconSet size="4">iconsets/tombkings_skeletonlineman.png</iconSet>
 		<skillList>
 			<skill>Regeneration</skill>
 			<skill>Thick Skull</skill>

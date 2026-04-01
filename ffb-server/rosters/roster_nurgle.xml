@@ -104,8 +104,8 @@
 		<agility>2</agility>
 		<passing>6</passing>
 		<armour>9</armour>
-		<portrait>portraits/nurgle_nurglewarrior.png</portrait>
-		<iconSet size="4">iconsets/nurgle_nurglewarrior.png</iconSet>
+		<portrait>portraits/nurgle_bloater.png</portrait>
+		<iconSet size="4">iconsets/nurgle_bloater.png</iconSet>
 		<skillList>
 			<skill>Disturbing Presence</skill>
 			<skill>Foul Appearance</skill>
@@ -132,8 +132,8 @@
 		<agility>1</agility>
 		<passing>0</passing>
 		<armour>9</armour>
-		<portrait>portraits/nurgle_beastofnurgle.png</portrait>
-		<iconSet size="1">iconsets/nurgle_beastofnurgle.png</iconSet>
+		<portrait>portraits/nurgle_rotspawn.png</portrait>
+		<iconSet size="1">iconsets/nurgle_rotspawn.png</iconSet>
 		<skillList>
 			<skill>Disturbing Presence</skill>
 			<skill>Foul Appearance</skill>

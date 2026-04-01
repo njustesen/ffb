@@ -18,8 +18,8 @@
 		<agility>1</agility>
 		<passing>0</passing>
 		<armour>9</armour>
-		<portrait>portraits/lizardman_kroxigor.png</portrait>
-		<iconSet size="1">iconsets/lizardman_kroxigor.png</iconSet>
+		<portrait>portraits/lizardmen_kroxigor.png</portrait>
+		<iconSet size="1">iconsets/lizardmen_kroxigor.png</iconSet>
 		<skillList>
 			<skill>Loner</skill>
 			<skill>bone head</skill>
@@ -46,8 +46,8 @@
 		<agility>1</agility>
 		<passing>6</passing>
 		<armour>9</armour>
-		<portrait>portraits/lizardman_saurus.png</portrait>
-		<iconSet size="6">iconsets/lizardman_saurus.png</iconSet>
+		<portrait>portraits/lizardmen_saurusblocker.png</portrait>
+		<iconSet size="6">iconsets/lizardmen_saurusblocker.png</iconSet>
 		<skillList></skillList>
 		<skillCategoryList>
 			<normal>General</normal>
@@ -68,8 +68,8 @@
 		<agility>3</agility>
 		<passing>4</passing>
 		<armour>7</armour>
-		<portrait>portraits/lizardman_skink.png</portrait>
-		<iconSet size="6">iconsets/lizardman_skink.png</iconSet>
+		<portrait>portraits/lizardmen_skinkrunner.png</portrait>
+		<iconSet size="6">iconsets/lizardmen_skinkrunner.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 			<skill>Stunty</skill>

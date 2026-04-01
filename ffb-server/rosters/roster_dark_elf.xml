@@ -20,8 +20,8 @@
 		<agility>4</agility>
 		<passing>4</passing>
 		<armour>8</armour>
-		<portrait>portraits/darkelf_lineman.png</portrait>
-		<iconSet size="3">iconsets/darkelf_lineman.png</iconSet>
+		<portrait>portraits/darkelf_darkelflineman.png</portrait>
+		<iconSet size="3">iconsets/darkelf_darkelflineman.png</iconSet>
 		<skillList></skillList>
 		<skillCategoryList>
 			<normal>General</normal>

@@ -19,8 +19,8 @@
 		<agility>3</agility>
 		<passing>5</passing>
 		<armour>7</armour>
-		<portrait>portraits/amazon_blitzer.png</portrait>
-		<iconSet size="4">iconsets/amazon_blitzer.png</iconSet>
+		<portrait>portraits/amazon_piranhawarriorblitzer.png</portrait>
+		<iconSet size="4">iconsets/amazon_piranhawarriorblitzer.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 			<skill>Block</skill>
@@ -43,8 +43,8 @@
 		<agility>3</agility>
 		<passing>5</passing>
 		<armour>7</armour>
-		<portrait>portraits/amazon_catcher.png</portrait>
-		<iconSet size="2">iconsets/amazon_catcher.png</iconSet>
+		<portrait>portraits/amazon_piranhawarriorcatcher.png</portrait>
+		<iconSet size="2">iconsets/amazon_piranhawarriorcatcher.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 			<skill>Catch</skill>
@@ -67,8 +67,8 @@
 		<agility>3</agility>
 		<passing>5</passing>
 		<armour>7</armour>
-		<portrait>portraits/amazon_thrower.png</portrait>
-		<iconSet size="2">iconsets/amazon_thrower.png</iconSet>
+		<portrait>portraits/amazon_eaglewarriorthrower.png</portrait>
+		<iconSet size="2">iconsets/amazon_eaglewarriorthrower.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 			<skill>Pass</skill>
@@ -91,8 +91,8 @@
 		<agility>3</agility>
 		<passing>4</passing>
 		<armour>7</armour>
-		<portrait>portraits/amazon_linewoman.png</portrait>
-		<iconSet size="2">iconsets/amazon_linewoman.png</iconSet>
+		<portrait>portraits/amazon_triballinewoman.png</portrait>
+		<iconSet size="2">iconsets/amazon_triballinewoman.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 		</skillList>

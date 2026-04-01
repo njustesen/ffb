@@ -24,8 +24,8 @@
 		<agility>3</agility>
 		<passing>4</passing>
 		<armour>8</armour>
-		<portrait>portraits/necromantic_werewolf.png</portrait>
-		<iconSet size="2">iconsets/necromantic_werewolf.png</iconSet>
+		<portrait>portraits/necromantichorror_werewolf.png</portrait>
+		<iconSet size="2">iconsets/necromantichorror_werewolf.png</iconSet>
 		<skillList>
 			<skill>Claw</skill>
 			<skill>Claws</skill>
@@ -50,8 +50,8 @@
 		<agility>2</agility>
 		<passing>0</passing>
 		<armour>9</armour>
-		<portrait>portraits/necromantic_fleshgolem.png</portrait>
-		<iconSet size="2">iconsets/necromantic_fleshgolem.png</iconSet>
+		<portrait>portraits/necromantichorror_fleshgolem.png</portrait>
+		<iconSet size="2">iconsets/necromantichorror_fleshgolem.png</iconSet>
 		<skillList>
 			<skill>Regeneration</skill>
 			<skill>Stand Firm</skill>
@@ -75,8 +75,8 @@
 		<agility>3</agility>
 		<passing>0</passing>
 		<armour>8</armour>
-		<portrait>portraits/necromantic_wight.png</portrait>
-		<iconSet size="2">iconsets/necromantic_wight.png</iconSet>
+		<portrait>portraits/necromantichorror_wightblitzer.png</portrait>
+		<iconSet size="2">iconsets/necromantichorror_wightblitzer.png</iconSet>
 		<skillList>
 			<skill>Block</skill>
 			<skill>Regeneration</skill>
@@ -99,8 +99,8 @@
 		<agility>3</agility>
 		<passing>4</passing>
 		<armour>7</armour>
-		<portrait>portraits/necromantic_ghoul.png</portrait>
-		<iconSet size="2">iconsets/necromantic_ghoul.png</iconSet>
+		<portrait>portraits/necromantichorror_ghoulrunner.png</portrait>
+		<iconSet size="2">iconsets/necromantichorror_ghoulrunner.png</iconSet>
 		<skillList>
 			<skill>Dodge</skill>
 		</skillList>
@@ -122,8 +122,8 @@
 		<agility>2</agility>
 		<passing>0</passing>
 		<armour>8</armour>
-		<portrait>portraits/necromantic_zombie.png</portrait>
-		<iconSet size="12">iconsets/necromantic_zombie.png</iconSet>
+		<portrait>portraits/necromantichorror_zombie.png</portrait>
+		<iconSet size="12">iconsets/necromantichorror_zombie.png</iconSet>
 		<skillList>
 			<skill>Regeneration</skill>
 		</skillList>

@@ -14,3 +14,5 @@
 /ffb-server/pom.xml.versionsBackup
 /ffb-tools/pom.xml.versionsBackup
 /pom.xml.versionsBackup
+ffb-server/lib/
+ffb-server/logs/

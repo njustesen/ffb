@@ -20,8 +20,8 @@
 		<agility>3</agility>
 		<passing>4</passing>
 		<armour>8</armour>
-		<portrait>portraits/chaospact_marauder.png</portrait>
-		<iconSet size="8">iconsets/chaospact_marauder.png</iconSet>
+		<portrait>portraits/chaosrenegade_renegadehumanlineman.png</portrait>
+		<iconSet size="8">iconsets/chaosrenegade_renegadehumanlineman.png</iconSet>
 		<skillList></skillList>
 		<skillCategoryList>
 			<normal>Strength</normal>
@@ -44,8 +44,8 @@
 		<passing>4</passing>
 		<armour>7</armour>
 		<race>Goblin</race>
-		<portrait>portraits/chaospact_goblinrenegade.png</portrait>
-		<iconSet size="1">iconsets/chaospact_goblinrenegade.png</iconSet>
+		<portrait>portraits/chaosrenegade_renegadegoblin.png</portrait>
+		<iconSet size="1">iconsets/chaosrenegade_renegadegoblin.png</iconSet>
 		<skillList>
 			<skill>Animosity</skill>
 			<skill>Dodge</skill>
@@ -73,8 +73,8 @@
 		<passing>4</passing>
 		<armour>7</armour>
 		<race>Skaven</race>
-		<portrait>portraits/chaospact_skavenrenegade.png</portrait>
-		<iconSet size="1">iconsets/chaospact_skavenrenegade.png</iconSet>
+		<portrait>portraits/chaosrenegade_renegadeskavenlineman.png</portrait>
+		<iconSet size="1">iconsets/chaosrenegade_renegadeskavenlineman.png</iconSet>
 		<skillList>
 			<skill>Animosity</skill>
 		</skillList>
@@ -99,8 +99,8 @@
 		<passing>3</passing>
 		<armour>8</armour>
 		<race>Dark Elf</race>
-		<portrait>portraits/chaospact_darkelfrenegade.png</portrait>
-		<iconSet size="1">iconsets/chaospact_darkelfrenegade.png</iconSet>
+		<portrait>portraits/chaosrenegade_renegadedarkelflineman.png</portrait>
+		<iconSet size="1">iconsets/chaosrenegade_renegadedarkelflineman.png</iconSet>
 		<skillList>
 			<skill>Animosity</skill>
 		</skillList>
@@ -124,8 +124,8 @@
 		<agility>1</agility>
 		<passing>5</passing>
 		<armour>9</armour>
-		<portrait>portraits/chaospact_chaostroll.png</portrait>
-		<iconSet size="1">iconsets/chaospact_chaostroll.png</iconSet>
+		<portrait>portraits/chaosrenegade_troll.png</portrait>
+		<iconSet size="1">iconsets/chaosrenegade_troll.png</iconSet>
 		<skillList>
 			<skill>Always Hungry</skill>
 			<skill>Loner</skill>
@@ -154,8 +154,8 @@
 		<agility>2</agility>
 		<passing>5</passing>
 		<armour>9</armour>
-		<portrait>portraits/chaospact_chaosogre.png</portrait>
-		<iconSet size="1">iconsets/chaospact_chaosogre.png</iconSet>
+		<portrait>portraits/chaosrenegade_ogre.png</portrait>
+		<iconSet size="1">iconsets/chaosrenegade_ogre.png</iconSet>
 		<skillList>
 			<skill>bone head</skill>
 			<skill>Loner</skill>
@@ -183,8 +183,8 @@
 		<agility>2</agility>
 		<passing>0</passing>
 		<armour>8</armour>
-		<portrait>portraits/chaospact_minotaur.png</portrait>
-		<iconSet size="1">iconsets/chaospact_minotaur.png</iconSet>
+		<portrait>portraits/chaosrenegade_minotaur.png</portrait>
+		<iconSet size="1">iconsets/chaosrenegade_minotaur.png</iconSet>
 		<skillList>
 			<skill>Frenzy</skill>
 			<skill>Horns</skill>

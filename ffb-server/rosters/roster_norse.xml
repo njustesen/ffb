@@ -96,8 +96,8 @@
 		<agility>3</agility>
 		<passing>5</passing>
 		<armour>7</armour>
-		<portrait>portraits/norse_runner.png</portrait>
-		<iconSet size="2">iconsets/norse_runner.png</iconSet>
+		<portrait>portraits/norse_catcher.png</portrait>
+		<iconSet size="2">iconsets/norse_catcher.png</iconSet>
 		<skillList>
 			<skill>Block</skill>
 			<skill>Dauntless</skill>
@@ -147,8 +147,8 @@
 		<agility>2</agility>
 		<passing>0</passing>
 		<armour>8</armour>
-		<portrait>portraits/norse_ulfwerener.png</portrait>
-		<iconSet size="2">iconsets/norse_ulfwerener.png</iconSet>
+		<portrait>portraits/norse_ulfwerenar.png</portrait>
+		<iconSet size="2">iconsets/norse_ulfwerenar.png</iconSet>
 		<skillList>
 			<skill>Frenzy</skill>
 		</skillList>

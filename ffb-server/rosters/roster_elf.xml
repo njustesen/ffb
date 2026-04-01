@@ -18,8 +18,8 @@
 		<agility>4</agility>
 		<passing>4</passing>
 		<armour>7</armour>
-		<portrait>portraits/elf_lineman.png</portrait>
-		<iconSet size="4">iconsets/elf_lineman.png</iconSet>
+		<portrait>portraits/elvenunion_lineman.png</portrait>
+		<iconSet size="4">iconsets/elvenunion_lineman.png</iconSet>
 		<skillList></skillList>
 		<skillCategoryList>
 			<normal>General</normal>
@@ -39,8 +39,8 @@
 		<agility>4</agility>
 		<passing>4</passing>
 		<armour>7</armour>
-		<portrait>portraits/elf_catcher.png</portrait>
-		<iconSet size="4">iconsets/elf_catcher.png</iconSet>
+		<portrait>portraits/elvenunion_catcher.png</portrait>
+		<iconSet size="4">iconsets/elvenunion_catcher.png</iconSet>
 		<skillList>
 			<skill>Catch</skill>
 			<skill>Nerves of Steel</skill>
@@ -63,8 +63,8 @@
 		<agility>4</agility>
 		<passing>2</passing>
 		<armour>7</armour>
-		<portrait>portraits/elf_thrower.png</portrait>
-		<iconSet size="2">iconsets/elf_thrower.png</iconSet>
+		<portrait>portraits/elvenunion_thrower.png</portrait>
+		<iconSet size="2">iconsets/elvenunion_thrower.png</iconSet>
 		<skillList>
 			<skill>Pass</skill>
 		</skillList>
@@ -86,8 +86,8 @@
 		<agility>4</agility>
 		<passing>3</passing>
 		<armour>8</armour>
-		<portrait>portraits/elf_blitzer.png</portrait>
-		<iconSet size="2">iconsets/elf_blitzer.png</iconSet>
+		<portrait>portraits/elvenunion_blitzer.png</portrait>
+		<iconSet size="2">iconsets/elvenunion_blitzer.png</iconSet>
 		<skillList>
 			<skill>Block</skill>
 			<skill>Side Step</skill>

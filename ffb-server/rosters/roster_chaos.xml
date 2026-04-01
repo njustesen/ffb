@@ -20,8 +20,8 @@
 		<agility>3</agility>
 		<passing>4</passing>
 		<armour>8</armour>
-		<portrait>portraits/chaos_beastman.png</portrait>
-		<iconSet size="4">iconsets/chaos_beastman.png</iconSet>
+		<portrait>portraits/chaoschosen_beastmanrunner.png</portrait>
+		<iconSet size="4">iconsets/chaoschosen_beastmanrunner.png</iconSet>
 		<skillList>
 			<skill>Horns</skill>
 		</skillList>
@@ -45,8 +45,8 @@
 		<agility>3</agility>
 		<passing>5</passing>
 		<armour>9</armour>
-		<portrait>portraits/chaos_chaoswarrior.png</portrait>
-		<iconSet size="6">iconsets/chaos_chaoswarrior.png</iconSet>
+		<portrait>portraits/chaoschosen_chosenblocker.png</portrait>
+		<iconSet size="6">iconsets/chaoschosen_chosenblocker.png</iconSet>
 		<skillList></skillList>
 		<skillCategoryList>
 			<normal>General</normal>
@@ -67,8 +67,8 @@
 		<agility>2</agility>
 		<passing>0</passing>
 		<armour>8</armour>
-		<portrait>portraits/chaos_minotaur.png</portrait>
-		<iconSet size="1">iconsets/chaos_minotaur.png</iconSet>
+		<portrait>portraits/chaoschosen_minotaur.png</portrait>
+		<iconSet size="1">iconsets/chaoschosen_minotaur.png</iconSet>
 		<skillList>
 			<skill>Loner</skill>
 			<skill>Frenzy</skill>

@@ -123,7 +123,11 @@ public class ClientCommandHandlerGameState extends ClientCommandHandler implemen
 						Collectors.toList());
 
 			AccessController.doPrivileged((PrivilegedAction<Void>) () -> {
-				ForkJoinPool.commonPool().invokeAll(tasks);
+				try {
+					ForkJoinPool.commonPool().invokeAll(tasks);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+				}
 				return null;
 			});
 
