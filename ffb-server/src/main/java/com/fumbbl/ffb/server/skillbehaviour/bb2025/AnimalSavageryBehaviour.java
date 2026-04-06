@@ -170,7 +170,7 @@ public class AnimalSavageryBehaviour extends SkillBehaviour<AnimalSavagery> {
 							PlayerState playerState = game.getFieldModel().getPlayerState(actingPlayer.getPlayer());
 							if (actingPlayer.isStandingUp()) {
 								game.getFieldModel().setPlayerState(actingPlayer.getPlayer(),
-									playerState.changeBase(PlayerState.PRONE).changeActive(false));
+									playerState.changeBase(PlayerState.PRONE).changeConfused(true).changeActive(false));
 							} else {
 								game.getFieldModel().setPlayerState(actingPlayer.getPlayer(),
 									playerState.changeBase(PlayerState.STANDING).changeActive(false).changeConfused(true));

@@ -146,7 +146,7 @@ public class BoneHeadBehaviour extends SkillBehaviour<BoneHead> {
 		PlayerState playerState = game.getFieldModel().getPlayerState(actingPlayer.getPlayer());
 		if (actingPlayer.isStandingUp()) {
 			game.getFieldModel().setPlayerState(actingPlayer.getPlayer(),
-					playerState.changeBase(PlayerState.PRONE).changeActive(false));
+					playerState.changeBase(PlayerState.PRONE).changeConfused(true).changeActive(false));
 		} else {
 			game.getFieldModel().setPlayerState(actingPlayer.getPlayer(),
 					playerState.changeConfused(true).changeActive(false));

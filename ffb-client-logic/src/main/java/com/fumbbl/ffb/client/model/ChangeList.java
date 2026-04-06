@@ -11,7 +11,10 @@ public class ChangeList {
 	public ChangeList() {
 		versions.add(new VersionChangeList("3.2.3")
 			.addBugfix("Weather Mage effect only lasted until end of drive/opponents next turn")
-			.addBugfix("On Linux JVMs past 1.8 it was not possible to close the actions menu by clicking the active player again")
+			.addBugfix(
+				"On Linux JVMs past 1.8 it was not possible to close the actions menu by clicking the active player again")
+			.addBugfix(
+				"Apply confusion flag if player is prone and fails the respective check (Bone Head, Really Stupid, Animal Savagery)")
 		);
 
 		versions.add(new VersionChangeList("3.2.2")
