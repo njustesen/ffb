@@ -9,6 +9,8 @@ public class ChangeList {
 	private final List<VersionChangeList> versions = new ArrayList<>();
 
 	public ChangeList() {
+		versions.add(new VersionChangeList("3.2.3")
+		);
 
 		versions.add(new VersionChangeList("3.2.2")
 			.addBugfix("All prayer rolls resulted in Blessing of Nuffle")
