@@ -219,7 +219,7 @@ public class StepEndTurn extends AbstractStep {
 	}
 
 	private void reRollArgue(Team team, boolean friendsWithTheRef, String playerId, TurnData turnData,
-		InducementType briberyReRoll) {
+	                         InducementType briberyReRoll) {
 		Inducement inducement = turnData.getInducementSet().getInducementMapping().get(briberyReRoll);
 		inducement.setUses(inducement.getUses() + 1);
 		turnData.getInducementSet().addInducement(inducement);
@@ -491,7 +491,10 @@ public class StepEndTurn extends AbstractStep {
 				deactivateEffectsAndPrayers(InducementDuration.UNTIL_END_OF_DRIVE, isHomeTurnEnding);
 				Arrays.stream(game.getPlayers())
 					.filter(player -> player.hasActiveEnhancement(KickoffResult.DODGY_SNACK.getName()))
-					.forEach(player -> game.getFieldModel().removeSkillEnhancements(player, KickoffResult.DODGY_SNACK.getName()));
+					.forEach(player -> {
+						game.getFieldModel().removeSkillEnhancements(player, KickoffResult.DODGY_SNACK.getName());
+						getGameState().updatePlayerMarkings();
+					});
 				removeReRollsLastingForDrive(true);
 				removeReRollsLastingForDrive(false);
 				UtilServerGame.prepareForSetup(game);
@@ -572,7 +575,7 @@ public class StepEndTurn extends AbstractStep {
 	}
 
 	private int getFaintingCount(Game game, List<KnockoutRecovery> knockoutRecoveries,
-		List<HeatExhaustion> heatExhaustions, List<Player<?>> unzappedPlayers) {
+	                             List<HeatExhaustion> heatExhaustions, List<Player<?>> unzappedPlayers) {
 		int faintingCount = 0;
 		if (fNewHalf || fTouchdown) {
 
@@ -741,7 +744,7 @@ public class StepEndTurn extends AbstractStep {
 	}
 
 	private void recoverKnockout(Player<?> pPlayer, InducementType reRollKOsInducement,
-		List<KnockoutRecovery> playerRecoveries) {
+	                             List<KnockoutRecovery> playerRecoveries) {
 		if (pPlayer != null) {
 			String playerId = pPlayer.getId();
 			int recoveryRoll = getGameState().getDiceRoller().rollKnockoutRecovery();

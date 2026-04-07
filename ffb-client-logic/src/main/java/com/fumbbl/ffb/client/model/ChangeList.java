@@ -16,6 +16,7 @@ public class ChangeList {
 			.addBugfix(
 				"Apply confusion flag if player is prone and fails the respective check (Bone Head, Really Stupid, Animal Savagery)")
 			.addBugfix("Ball & Chain hit by bomb did roll for armour")
+			.addBugfix("Dodgy Snack did not trigger auto marking update")
 		);
 
 		versions.add(new VersionChangeList("3.2.2")
