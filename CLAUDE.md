@@ -30,7 +30,12 @@ Build order (declared in root `pom.xml`):
 4. **ffb-client-logic** — Platform-agnostic client logic (the bulk of client code). Handles server command processing (`handler/`), game-phase state machines (`state/`), and 150+ dialog handlers (`dialog/`). Uses Tyrus WebSocket client.
 5. **ffb-client** — AWT/Swing UI layer. Entry point: `com.fumbbl.ffb.client.FantasyFootballClientAwt`. Layer-based rendering (`layer/`), `FieldComponent`, `UserInterface`, `IconCache`, `ActionKeyBindings`.
 6. **ffb-resources** — Packaged sound and icon assets JAR.
-7. **ffb-ai** — Headless AI agent. Entry point: `com.fumbbl.ffb.ai.AiMain`. Extends `FantasyFootballClientAwt` with a hidden Swing window. `AiDecisionEngine` polls every 100 ms and responds to server-sent dialogs and active game states via `RandomStrategy`. Includes `GameSimulator` for JSON-based game state cloning (forward modelling scaffold).
+7. **ffb-ai** — Headless AI agent and in-process simulation harness.
+   - **WebSocket agent** (`AiMain`): extends `FantasyFootballClientAwt` with a hidden Swing window; `AiDecisionEngine` polls every 100 ms and responds to server dialogs and game states.
+   - **Headless simulation** (`simulation/MatchRunner`): runs complete games entirely in-process via `HeadlessFantasyFootballServer` — no server process, no WebSocket, ~500 ms/game. Supports four `AgentMode` values (`SCRIPTED_SAMPLE`, `SCRIPTED_ARGMAX`, `RANDOM`, and custom temperature) and runs comparative experiments with Wilson-score confidence intervals and per-level timing breakdowns.
+   - **Move policy** (`MoveDecisionEngine`, `PathProbabilityFinder`, `ActionScore`): scores and selects player actions and target squares using path probability and field-position heuristics.
+   - **Dialog policy** (`strategy/ScriptedStrategy`): scores all server-sent dialog types (block dice, re-rolls, fouls, apothecary, etc.) and samples decisions using a piecewise-linear temperature parameter: T=0 → argmax, T=0.5 → raw softmax policy (default), T=1 → uniform random.
+   - **Sampling** (`PolicySampler`): softmax, argmax, and `sampleMixed`/`chooseBoolMixed` for the temperature-interpolated distribution.
 
 The shade plugin embeds `ffb-common` into the server and client JARs for distribution.
 
@@ -60,13 +65,24 @@ To play against the AI agent (human vs AI):
 
 The human client opens as Kalimar; the AI agent joins headlessly as BattleLore.
 
-To run a fully automated AI-vs-AI game:
+To run a fully automated AI-vs-AI game (WebSocket-based, requires MariaDB + server):
 
 ```bash
 ./play-ai-vs-ai.sh
 ```
 
 Both sides run headlessly. Logs go to `/tmp/ffb-ai-kalimar.log` and `/tmp/ffb-ai-battlelore.log`.
+
+To run the headless simulation experiment (no server, no DB — all in-process):
+
+```bash
+mvn install -DskipTests -pl ffb-ai -am
+mvn -pl ffb-ai exec:java \
+  -Dexec.mainClass=com.fumbbl.ffb.ai.simulation.MatchRunner \
+  -Dexec.args="/path/to/repo 200"
+```
+
+This runs 200 games per condition across four agent pairings (Sample vs Random, Argmax vs Random, Sample vs Argmax, Random vs Random) and prints win rates with 95% Wilson CI and per-level timing statistics. Average game time is ~500 ms. The `run-games.sh` script is an older alternative that drives games through a real server.
 
 ### One-time setup prerequisites (already done if `play.sh` has been run before)
 - MariaDB installed via Homebrew (`brew install mariadb`)

@@ -108,7 +108,12 @@ public final class SGoRules {
      * thousands to execute optimally (precise cluster direction and shape).
      *
      * - success (roll > k_dice or roll = 6): piece placed, turn continues.
-     * - any failure (roll <= k_dice or roll = 1): turn ends.
+     * - fumble (roll = 1): turn ends, no stone changes.
+     * - non-fumble failure (roll <= k_dice, roll != 1): turn ends; the lowest-index
+     *   adjacent stone belonging to the ATTACKER is removed (if any). This creates an
+     *   asymmetry: P1 with a dense cluster (k_dice=0) has zero non-fumble failures, so
+     *   its cluster is immune. P2 randomly attacking P1's territory (k_dice=5) fails
+     *   non-fumble 4/6 and erodes its own adjacent stones.
      */
     public static SGoState applyPlacement(SGoState state, int cell, int roll) {
         int kOpp = adjacentOpponentCount(state.board, cell, state.currentPlayer);
@@ -126,18 +131,15 @@ public final class SGoRules {
             next.isTurnEnd = true;
             next.stateHash ^= Zobrist.TURN_END[0] ^ Zobrist.TURN_END[1];
 
-            // Non-fumble failure (roll != 1, so roll <= k_dice): capture the lowest-index
-            // adjacent opponent stone. This prevents board-fill while punishing risky play
-            // (attacker loses their turn but gains one opponent stone captured).
+            // Non-fumble failure: remove lowest-index adjacent attacker stone (if any).
             if (roll != 1) {
-                int opponent = (state.currentPlayer == SGoState.P1) ? SGoState.P2 : SGoState.P1;
                 int[] neighbors = NEIGHBORS[cell];
                 for (int i = 0; i < neighbors.length; i++) {
                     int nb = neighbors[i];
-                    if (next.board[nb] == opponent) {
+                    if (next.board[nb] == state.currentPlayer) {
                         next.board[nb] = SGoState.EMPTY;
                         next.emptyCells |= (1L << nb);
-                        next.stateHash ^= Zobrist.BOARD[nb * 3 + opponent];
+                        next.stateHash ^= Zobrist.BOARD[nb * 3 + state.currentPlayer];
                         break;
                     }
                 }

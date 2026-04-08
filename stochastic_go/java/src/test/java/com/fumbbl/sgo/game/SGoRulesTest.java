@@ -18,7 +18,8 @@ public class SGoRulesTest {
         assertEquals(SGoState.TOTAL_TURNS, s.p1TurnsRemaining);
         assertEquals(SGoState.TOTAL_TURNS, s.p2TurnsRemaining);
         assertFalse(s.isTurnEnd);
-        assertEquals((1L << SGoState.TOTAL_CELLS) - 1L, s.emptyCells); // all TOTAL_CELLS bits set
+        long expectedEmpty = SGoState.TOTAL_CELLS < 64 ? (1L << SGoState.TOTAL_CELLS) - 1L : -1L;
+        assertEquals(expectedEmpty, s.emptyCells); // all TOTAL_CELLS bits set
         assertFalse(s.isTerminal());
     }
 
@@ -51,19 +52,19 @@ public class SGoRulesTest {
     void adjacentOpponentCountEmptyBoard() {
         SGoState s = SGoState.initial();
         assertEquals(0, SGoRules.adjacentOpponentCount(s.board, 0, SGoState.P1));
-        // Cell 12 = center of 5x5 board (row=2,col=2)
-        assertEquals(0, SGoRules.adjacentOpponentCount(s.board, 12, SGoState.P1));
+        // Cell 24 = (row=3,col=3) in 7x7
+        assertEquals(0, SGoRules.adjacentOpponentCount(s.board, 24, SGoState.P1));
     }
 
     @Test
     void adjacentOpponentCountWithOpponents() {
         SGoState s = SGoState.initial();
-        // Place P2 at cell 1 (row=0,col=1 in 5x5)
+        // Place P2 at cell 1 (row=0,col=1 in 8x8)
         s.board[1] = SGoState.P2;
-        // Cell 0 (row=0,col=0) has neighbors: 1,5,6 — P2 at cell 1 → count=1
+        // Cell 0 (row=0,col=0) has neighbors: 1,8,9 — P2 at cell 1 → count=1
         assertEquals(1, SGoRules.adjacentOpponentCount(s.board, 0, SGoState.P1));
-        // Cell 6 (row=1,col=1) has neighbors: 0,1,2,5,7,10,11,12 — P2 at cell 1 → count=1
-        assertEquals(1, SGoRules.adjacentOpponentCount(s.board, 6, SGoState.P1));
+        // Cell 9 (row=1,col=1) has neighbors: 0,1,2,8,10,16,17,18 — P2 at cell 1 → count=1
+        assertEquals(1, SGoRules.adjacentOpponentCount(s.board, 9, SGoState.P1));
     }
 
     @Test
@@ -90,23 +91,43 @@ public class SGoRulesTest {
     }
 
     @Test
-    void applyPlacementNonFumbleFailureCapturesAndEndsTurn() {
-        // 5x5 board: cell 10 = row=2,col=0; neighbors are 5,6,11,15,16.
-        // Set up: P1 tries cell 10 with 2 P2 neighbors (k_opp=2, k_fri=0 → k_dice=max(0,3+2-0)=5).
-        // roll=2 <= k_dice=5 AND roll!=1 → non-fumble failure → capture + turn ends.
-        // Lowest-index P2 neighbor of cell 10 = cell 5.
+    void applyPlacementNonFumbleFailureNoAdjacentAttackerStone() {
+        // 8x8 board: cell 10 = row=1,col=2; neighbors include 9=(1,1) and 11=(1,3).
+        // P1 tries cell 10 with 2 P2 neighbors (k_opp=2, k_fri=0 → k_dice=5).
+        // roll=2 → non-fumble failure. P1 has NO adjacent own stones → just end turn.
         SGoState s = SGoState.initial();
-        s.board[5] = SGoState.P2;
-        s.board[6] = SGoState.P2;
-        s.emptyCells &= ~(1L << 5);
-        s.emptyCells &= ~(1L << 6);
+        s.board[9] = SGoState.P2;
+        s.board[11] = SGoState.P2;
+        s.emptyCells &= ~(1L << 9);
+        s.emptyCells &= ~(1L << 11);
         s.stateHash = s.computeHash();
 
         SGoState next = SGoRules.applyPlacement(s, 10, 2);
         assertEquals(SGoState.EMPTY, next.board[10]); // piece NOT placed
         assertTrue(next.isTurnEnd);                   // turn ends
-        assertEquals(SGoState.EMPTY, next.board[5]);  // P2 stone at cell 5 captured
-        assertEquals(SGoState.P2, next.board[6]);     // P2 stone at cell 6 untouched
+        assertEquals(SGoState.P2, next.board[9]);     // P2 stones untouched (only attacker's own removed)
+        assertEquals(SGoState.P2, next.board[11]);
+        assertEquals(next.stateHash, next.computeHash());
+    }
+
+    @Test
+    void applyPlacementNonFumbleFailureRemovesAttackerOwnStone() {
+        // 8x8 board: P1 tries cell 10=(1,2) with 1 P2 neighbor (cell 9=(1,1)) and
+        // 1 P1 own stone (cell 11=(1,3)). k_opp=1, k_fri=1 → k_dice=max(0,3+1-1)=3.
+        // roll=2 ≤ k_dice=3 AND roll≠1 → non-fumble failure → P1 loses own stone at cell 11.
+        SGoState s = SGoState.initial();
+        s.board[9] = SGoState.P2;
+        s.board[11] = SGoState.P1;
+        s.emptyCells &= ~(1L << 9);
+        s.emptyCells &= ~(1L << 11);
+        s.stateHash = s.computeHash();
+
+        SGoState next = SGoRules.applyPlacement(s, 10, 2);
+        assertEquals(SGoState.EMPTY, next.board[10]); // piece NOT placed
+        assertTrue(next.isTurnEnd);                   // turn ends
+        assertEquals(SGoState.P2, next.board[9]);     // P2 stone untouched
+        assertEquals(SGoState.EMPTY, next.board[11]); // P1's own stone removed
+        assertTrue((next.emptyCells & (1L << 11)) != 0); // cell 11 now empty
         assertEquals(next.stateHash, next.computeHash());
     }
 
@@ -120,25 +141,25 @@ public class SGoRulesTest {
 
         SGoState next = SGoRules.applyPlacement(s, 0, 1);
         assertTrue(next.isTurnEnd);
-        assertEquals(SGoState.P2, next.board[1]); // not captured (fumble, not non-fumble failure)
+        assertEquals(SGoState.P2, next.board[1]); // not captured
         assertEquals(next.stateHash, next.computeHash());
     }
 
     @Test
     void applyPlacementFriendlySupportReducesKDice() {
-        // In 5x5, cell 0's neighbors include cells 1 and 5.
-        // P1 has 2 friendlies adjacent to cell 0 (cells 1 and 5). No opponents.
+        // In 8x8, cell 0's neighbors include cells 1=(0,1) and 8=(1,0).
+        // P1 has 2 friendlies adjacent to cell 0 (cells 1 and 8). No opponents.
         // k_opp=0, k_fri=2 → k_dice = max(0, 3+0-2) = 1.
         // Roll 2 should succeed (roll=2 > k_dice=1 and roll!=1).
         SGoState s = SGoState.initial();
         s.board[1] = SGoState.P1;
-        s.board[5] = SGoState.P1;
+        s.board[8] = SGoState.P1;
         s.emptyCells &= ~(1L << 1);
-        s.emptyCells &= ~(1L << 5);
+        s.emptyCells &= ~(1L << 8);
         s.stateHash = s.computeHash();
 
         SGoState next = SGoRules.applyPlacement(s, 0, 2);
-        assertEquals(SGoState.P1, next.board[0]);
+        assertEquals(SGoState.P1, next.board[0]); // placed
         assertFalse(next.isTurnEnd);
         assertEquals(next.stateHash, next.computeHash());
     }

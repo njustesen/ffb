@@ -16,12 +16,16 @@ public class AiClient extends FantasyFootballClientAwt {
     private final boolean home;
 
     public AiClient(ClientParameters parameters, String password, boolean home) throws IOException {
+        this(parameters, password, home, false);
+    }
+
+    public AiClient(ClientParameters parameters, String password, boolean home, boolean useRandom) throws IOException {
         super(parameters);
         this.home = home;
         // Hide the Swing window — the AI does not need to render anything.
         getUserInterface().setVisible(false);
         // Start the decision loop as a daemon thread.
-        AiDecisionEngine engine = new AiDecisionEngine(this, password, home);
+        AiDecisionEngine engine = new AiDecisionEngine(this, password, home, useRandom);
         Thread engineThread = new Thread(engine, "AI-DecisionEngine");
         engineThread.setDaemon(true);
         engineThread.start();

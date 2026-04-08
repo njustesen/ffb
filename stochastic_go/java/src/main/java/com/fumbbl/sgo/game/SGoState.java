@@ -12,7 +12,7 @@ public final class SGoState {
     public static final int EMPTY = 0;
     public static final int P1 = 1;
     public static final int P2 = 2;
-    public static final int BOARD_SIZE = 5;
+    public static final int BOARD_SIZE = 8;
     public static final int TOTAL_CELLS = BOARD_SIZE * BOARD_SIZE;
     public static final int TOTAL_TURNS = 20;
 
@@ -37,7 +37,8 @@ public final class SGoState {
 
     public static SGoState initial() {
         int[] board = new int[TOTAL_CELLS];
-        long empty = (1L << TOTAL_CELLS) - 1L; // only bits 0..TOTAL_CELLS-1
+        // 1L << 64 overflows; for a full 64-cell board use -1L (all bits set)
+        long empty = TOTAL_CELLS < 64 ? (1L << TOTAL_CELLS) - 1L : -1L;
         SGoState s = new SGoState(board, P1, TOTAL_TURNS, TOTAL_TURNS, false, empty, 0L);
         s.stateHash = s.computeHash();
         return s;

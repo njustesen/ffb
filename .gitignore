@@ -17,3 +17,9 @@
 ffb-server/lib/
 ffb-server/logs/
 ffb-ai/target/
+logs/
+stochastic_go/**/__pycache__/
+stochastic_go/**/*.pyc
+stochastic_go/lib/
+stochastic_go/java/target/
+stochastic_go/.pytest_cache/

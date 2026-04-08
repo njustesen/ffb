@@ -116,14 +116,16 @@ cd "$CLIENT_DIST" && java -cp "$AI_CP" com.fumbbl.ffb.ai.AiMain \
   -coach Kalimar -password test -server localhost -port 22227 -home \
   -teamId teamLizardmanKalimar -teamName "Kalimar's Lizards" \
   > /tmp/ffb-ai-kalimar.log 2>&1 &
+AI1_PID=$!
 
 sleep 1
 
-echo ">> Launching AI agent 2 (BattleLore)..."
+echo ">> Launching AI agent 2 (BattleLore — random)..."
 cd "$CLIENT_DIST" && java -cp "$AI_CP" com.fumbbl.ffb.ai.AiMain \
   -coach BattleLore -password test -server localhost -port 22227 \
-  -teamId teamHumanBattleLore -teamName "BattleLore's Humans" \
+  -teamId teamHumanBattleLore -teamName "BattleLore's Humans" -random \
   > /tmp/ffb-ai-battlelore.log 2>&1 &
+AI2_PID=$!
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -133,3 +135,8 @@ echo "  AI 1 (Kalimar) log:     /tmp/ffb-ai-kalimar.log"
 echo "  AI 2 (BattleLore) log:  /tmp/ffb-ai-battlelore.log"
 echo "  Server log:             /tmp/ffb-server.log"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Wait for both agents to finish and then clean up
+wait $AI1_PID $AI2_PID 2>/dev/null || true
+echo ">> Game over. Stopping server..."
+pkill -f "FantasyFootballServer" 2>/dev/null || true

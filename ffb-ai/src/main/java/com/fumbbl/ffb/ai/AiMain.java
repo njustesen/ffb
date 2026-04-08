@@ -24,6 +24,7 @@ public class AiMain {
         String server = "localhost";
         int port = 22227;
         boolean home = false;
+        boolean useRandom = false;
         String teamId = null;
         String teamName = null;
 
@@ -43,6 +44,9 @@ public class AiMain {
                     break;
                 case "-home":
                     home = true;
+                    break;
+                case "-random":
+                    useRandom = true;
                     break;
                 case "-teamId":
                     teamId = args[++i];
@@ -81,7 +85,7 @@ public class AiMain {
         }
 
         try {
-            AiClient client = new AiClient(parameters, password, home);
+            AiClient client = new AiClient(parameters, password, home, useRandom);
             client.startClient();
             // Block the main thread so the JVM does not exit
             synchronized (AiMain.class) {
