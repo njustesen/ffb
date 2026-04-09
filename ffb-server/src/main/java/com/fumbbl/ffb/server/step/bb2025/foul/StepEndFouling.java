@@ -23,7 +23,7 @@ import com.fumbbl.ffb.server.step.UtilServerSteps;
 import com.fumbbl.ffb.server.step.generator.EndPlayerAction;
 import com.fumbbl.ffb.server.step.generator.Select;
 import com.fumbbl.ffb.server.step.generator.SequenceGenerator;
-import com.fumbbl.ffb.server.step.generator.bb2020.Move;
+import com.fumbbl.ffb.server.step.generator.bb2025.Move;
 import com.fumbbl.ffb.util.UtilPlayer;
 
 /**
