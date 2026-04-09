@@ -16,8 +16,8 @@ public final class StateNode {
     public SGoState state;
     public boolean isTurnEnd;
 
-    // Direct-indexed by action id (0..TOTAL_CELLS). Null until expanded.
-    public final ActionEdge[] edges = new ActionEdge[SGoAction.END_TURN_ID + 1];
+    // Direct-indexed by action id (0..TOTAL_CELLS). Null until first expanded.
+    public ActionEdge[] edges = null; // lazily created in expandActions to avoid 520B per leaf node
     // Parallel list of populated edge ids for fast iteration
     public int[] edgeIds = null;
     public int edgeCount = 0;

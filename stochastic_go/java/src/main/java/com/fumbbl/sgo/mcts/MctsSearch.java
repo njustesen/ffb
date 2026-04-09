@@ -128,7 +128,12 @@ public final class MctsSearch {
             }
 
             int actionIdx = selectAction(node, player);
-            ActionEdge edge = node.edges[node.edgeIds[actionIdx]];
+            int actionId = node.edgeIds[actionIdx];
+            // Lazily create ActionEdge on first selection (avoids allocating all ~49 edges upfront)
+            if (node.edges[actionId] == null) {
+                node.edges[actionId] = new ActionEdge(actionId);
+            }
+            ActionEdge edge = node.edges[actionId];
             depth++;
 
             PathEntry pe = ctx.path[ctx.pathSize++];
@@ -176,13 +181,18 @@ public final class MctsSearch {
         return node;
     }
 
-    /** Lazily populate action edges for a node. */
+    /**
+     * Populate action edge IDs for a node. ActionEdge objects are created lazily
+     * on first visit in traverseTurn to avoid allocating ~49 ActionEdge objects per
+     * node regardless of how many are ever visited (~640MB savings at 1000ms budget).
+     */
     private void expandActions(StateNode node, SGoState state, int player) {
         // Only place actions: turn ends naturally on failure (no voluntary END_TURN).
-        // This eliminates the conservative-bias problem at low iteration counts where
-        // MCTS would converge to END_TURN too early based on sparse sampling.
         int emptyCount = Long.bitCount(state.emptyCells);
 
+        // Lazily create the edges array here (not at StateNode construction) to avoid
+        // allocating 65 × 8 = 520 bytes for every leaf node that is never expanded.
+        node.edges = new ActionEdge[SGoAction.END_TURN_ID + 1];
         node.edgeIds = new int[emptyCount];
         int idx = 0;
 
@@ -190,7 +200,7 @@ public final class MctsSearch {
         while (bits != 0L) {
             int cell = Long.numberOfTrailingZeros(bits);
             bits &= bits - 1L;
-            node.edges[cell] = new ActionEdge(cell);
+            // No ActionEdge object created here — created lazily on first selection
             node.edgeIds[idx++] = cell;
         }
         node.edgeCount = idx;
@@ -199,6 +209,7 @@ public final class MctsSearch {
     /**
      * UCB action selection. Returns index into node.edgeIds[].
      * P1 maximizes, P2 minimizes (flip sign for P2).
+     * Null edges (not yet visited) are treated as unvisited (n=0).
      */
     private int selectAction(StateNode node, int player) {
         int N = node.visitCount + 1;
@@ -213,7 +224,7 @@ public final class MctsSearch {
 
         for (int i = 0; i < count; i++) {
             ActionEdge edge = edges[edgeIds[i]];
-            int n = edge.visitCount;
+            int n = edge != null ? edge.visitCount : 0;
             double v = n > 0 ? edge.valueSum / n : 0.0;
             if (player != SGoState.P1) v = -v;
             double score = v + C_ACTION * Math.sqrt(logN / (n + 1));
@@ -345,8 +356,9 @@ public final class MctsSearch {
         for (int i = 0; i < root.edgeCount; i++) {
             int id = edgeIds[i];
             ActionEdge edge = edges[id];
-            if (edge.visitCount > bestVisits) {
-                bestVisits = edge.visitCount;
+            int visits = edge != null ? edge.visitCount : 0;
+            if (visits > bestVisits) {
+                bestVisits = visits;
                 bestId = id;
             }
         }
@@ -385,6 +397,7 @@ public final class MctsSearch {
             for (int i = 0; i < root.edgeCount; i++) {
                 int id = edgeIds[i];
                 ActionEdge edge = edges[id];
+                if (edge == null) continue; // not yet visited
                 String key = id == SGoAction.END_TURN_ID ? "end_turn"
                         : "place(" + (id / SGoState.BOARD_SIZE) + "," + (id % SGoState.BOARD_SIZE) + ")";
                 stats.rootVisitDistribution.put(key, edge.visitCount);
@@ -401,6 +414,7 @@ public final class MctsSearch {
             int[] edgeIds = n.edgeIds;
             for (int i = 0; i < n.edgeCount; i++) {
                 ActionEdge edge = edges[edgeIds[i]];
+                if (edge == null) continue; // not yet visited
                 ChanceNode cn = edge.chanceNode;
                 if (cn != null && cn.totalVisits > 0) {
                     klSum += klDivergence(cn);

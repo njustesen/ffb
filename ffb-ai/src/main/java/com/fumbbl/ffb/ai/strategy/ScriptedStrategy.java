@@ -6,6 +6,7 @@ import com.fumbbl.ffb.FieldCoordinate;
 import com.fumbbl.ffb.IDialogParameter;
 import com.fumbbl.ffb.PlayerChoiceMode;
 import com.fumbbl.ffb.PlayerState;
+import com.fumbbl.ffb.ReRolledActions;
 import com.fumbbl.ffb.ReRollSources;
 import com.fumbbl.ffb.SeriousInjury;
 import com.fumbbl.ffb.ai.ActionScore;
@@ -550,7 +551,7 @@ public final class ScriptedStrategy {
             // ── Bribery and corruption (decline) ──────────────────────────────────
 
             case BRIBERY_AND_CORRUPTION_RE_ROLL:
-                comm.sendUseReRoll(null, null);
+                comm.sendUseReRoll(ReRolledActions.ARGUE_THE_CALL, null);
                 break;
 
             // ── Select position (first min available) ─────────────────────────────

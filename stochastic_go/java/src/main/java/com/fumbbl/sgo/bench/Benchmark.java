@@ -333,10 +333,17 @@ public final class Benchmark {
                     p1Active = true; p1Search.search(state, p1Iters);
                 }
                 SGoAction action = p1Search.bestKnownAction(state);
-                if (action == null) action = p1Search.search(state, p1Iters).action;
+                if (action == null) {
+                    // State not yet expanded in main tree (deep dice outcome). Use a fresh
+                    // lightweight search rather than bloating the main TT with another full budget.
+                    action = new MctsSearch(new SearchContext(), p1Rng).search(state, 1000).action;
+                }
                 state = applyAction(state, action, rng);
             } else {
-                p1Active = false;
+                if (p1Active) {
+                    // Explicitly release search tree to allow GC before allocating the next turn's tree.
+                    p1Ctx = null; p1Search = null; p1Active = false;
+                }
                 state = applyRandomPlacement(state, rng);
             }
             if (state.isTurnEnd && !state.isTerminal()) state = SGoRules.advanceTurn(state);

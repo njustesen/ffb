@@ -14,6 +14,8 @@ import com.fumbbl.ffb.ai.MoveDecisionEngine;
 import com.fumbbl.ffb.ai.PathProbabilityFinder;
 import com.fumbbl.ffb.ai.strategy.RandomStrategy;
 import com.fumbbl.ffb.ai.strategy.ScriptedStrategy;
+import com.fumbbl.ffb.dialog.DialogArgueTheCallParameter;
+import com.fumbbl.ffb.dialog.DialogBriberyAndCorruptionParameter;
 import com.fumbbl.ffb.dialog.DialogPlayerChoiceParameter;
 import com.fumbbl.ffb.model.ActingPlayer;
 import com.fumbbl.ffb.model.FieldModel;
@@ -374,6 +376,23 @@ public class MatchRunner {
         boolean prevHomePlaying = game.isHomePlaying();
         final int MAX_PHASE2_VISITS = 20;
 
+        // SETUP-phase stuck detector: if the same (stepId, homePlaying) pair repeats
+        // without the game advancing we're in a SETUP_ERROR feedback loop. Abort fast
+        // instead of spinning for 100 000 iterations.
+        StepId setupStuckStep = null;
+        boolean setupStuckHome = false;
+        int setupStuckCount = 0;
+        final int MAX_SETUP_REPEATS = 12;
+
+        // General stuck-step detector: if a non-SETUP, non-INIT_SELECTING step repeats
+        // many times in a row without any dialog, it's cycling (e.g. vampire blood-lust
+        // foul-move loop). Inject EndTurn to break out; fast-fail if EndTurn is rejected.
+        StepId generalStuckStep = null;
+        int generalStuckCount = 0;
+        int generalStuckEndTurns = 0;
+        final int MAX_GENERAL_REPEATS = 50;
+        final int MAX_GENERAL_END_TURNS = 3;
+
         int iter = 0;
         while (game.getFinished() == null && ++iter < MAX_ITERATIONS) {
             IStep step = gameState.getCurrentStep();
@@ -420,6 +439,52 @@ public class MatchRunner {
                         continue;
                     }
                 }
+            }
+
+            // SETUP-phase stuck detector: count how many consecutive non-dialog iterations
+            // share the same (stepId, homePlaying) pair.  Dialogs don't reset the count
+            // because a stuck loop can consist of alternating step + dialog iterations.
+            // Only reset when we leave the SETUP phase entirely.
+            if (game.getTurnMode() == TurnMode.SETUP) {
+                if (dialog == null) {
+                    boolean curHome = game.isHomePlaying();
+                    if (stepId == setupStuckStep && curHome == setupStuckHome) {
+                        if (++setupStuckCount >= MAX_SETUP_REPEATS) {
+                            return null;
+                        }
+                    } else {
+                        setupStuckStep = stepId;
+                        setupStuckHome = curHome;
+                        setupStuckCount = 0;
+                    }
+                }
+                // dialogs: leave count unchanged — they interleave but don't mean progress
+            } else {
+                setupStuckStep = null;
+                setupStuckCount = 0;
+            }
+
+            // General stuck-step detector (non-SETUP, non-INIT_SELECTING, no dialog)
+            if (game.getTurnMode() != TurnMode.SETUP
+                    && stepId != StepId.INIT_SELECTING && dialog == null) {
+                if (stepId == generalStuckStep) {
+                    if (++generalStuckCount >= MAX_GENERAL_REPEATS) {
+                        if (++generalStuckEndTurns > MAX_GENERAL_END_TURNS) {
+                            return null;
+                        }
+                        inject(gameState, new com.fumbbl.ffb.net.commands.ClientCommandEndTurn(game.getTurnMode(), null));
+                        generalStuckCount = 0;
+                        continue;
+                    }
+                } else {
+                    generalStuckStep = stepId;
+                    generalStuckCount = 1;
+                    generalStuckEndTurns = 0;
+                }
+            } else if (dialog != null || stepId == StepId.INIT_SELECTING) {
+                generalStuckStep = null;
+                generalStuckCount = 0;
+                generalStuckEndTurns = 0;
             }
 
             boolean homeStep = game.isHomePlaying();
@@ -481,7 +546,6 @@ public class MatchRunner {
 
             case SETUP: {
                 resetCurrentTeam(game);
-                (home ? homeSetup : awaySetup).applyTo(game);
                 placeReserves(game, gameState);
                 inject(gameState, new ClientCommandEndTurn(TurnMode.SETUP, null));
                 break;
@@ -548,8 +612,23 @@ public class MatchRunner {
             }
 
             case INIT_MOVING: {
-                // The player has already moved to their destination via the full path sent in
-                // INIT_SELECTING. End the activation if we reach here.
+                // Normally the player has already moved via the full path sent in INIT_SELECTING.
+                // For blood-lust FOUL_MOVE, StepEndFouling pushes a fresh Move sequence with no
+                // prior move — INIT_MOVING is the first step and the vampire still needs to foul.
+                // StepInitMoving handles CLIENT_FOUL for FOUL_MOVE by dispatching the Foul sequence.
+                ActingPlayer apMove = game.getActingPlayer();
+                if (apMove != null && apMove.getPlayerAction() == PlayerAction.FOUL_MOVE
+                        && !apMove.hasFouled()) {
+                    Team oppTeamMove = home ? game.getTeamAway() : game.getTeamHome();
+                    FieldCoordinate posMove = game.getFieldModel().getPlayerCoordinate(apMove.getPlayer());
+                    Player<?>[] foulTargets = posMove != null
+                        ? UtilPlayer.findAdjacentPronePlayers(game, oppTeamMove, posMove)
+                        : new Player<?>[0];
+                    if (foulTargets != null && foulTargets.length > 0) {
+                        inject(gameState, new ClientCommandFoul(apMove.getPlayerId(), foulTargets[0].getId(), false));
+                        break;
+                    }
+                }
                 inject(gameState, new ClientCommandActingPlayer(null, null, false));
                 break;
             }
@@ -581,7 +660,7 @@ public class MatchRunner {
         Team oppTeam = home ? game.getTeamAway() : game.getTeamHome();
         PlayerAction action = ap.getPlayerAction();
 
-        if (action == PlayerAction.MOVE) {
+        if (action == PlayerAction.MOVE || action == PlayerAction.FOUL_MOVE) {
             boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX);
             MoveDecisionEngine.MoveResult mr = MoveDecisionEngine.selectMoveTarget(
                 game, ap, myTeam, oppTeam, home, rng, argmax);
@@ -848,6 +927,12 @@ public class MatchRunner {
     }
 
     private static String getDialogTeamId(IDialogParameter dialog) {
+        if (dialog instanceof DialogArgueTheCallParameter) {
+            return ((DialogArgueTheCallParameter) dialog).getTeamId();
+        }
+        if (dialog instanceof DialogBriberyAndCorruptionParameter) {
+            return ((DialogBriberyAndCorruptionParameter) dialog).getTeamId();
+        }
         if (dialog instanceof DialogPlayerChoiceParameter) {
             return ((DialogPlayerChoiceParameter) dialog).getTeamId();
         }
@@ -925,6 +1010,7 @@ public class MatchRunner {
                 }
             }
         }
+
     }
 
     // ── Injection helpers ─────────────────────────────────────────────────────

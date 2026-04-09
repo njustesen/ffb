@@ -23,3 +23,7 @@ stochastic_go/**/*.pyc
 stochastic_go/lib/
 stochastic_go/java/target/
 stochastic_go/.pytest_cache/
+
+# Python
+__pycache__/
+*.pyc

@@ -94,6 +94,7 @@ public class MctsSearchTest {
             if (!node.isExpanded()) continue;
             for (int i = 0; i < node.edgeCount; i++) {
                 ActionEdge edge = node.edges[node.edgeIds[i]];
+                if (edge == null) continue; // not yet visited (lazy creation)
                 ChanceNode cn = edge.chanceNode;
                 if (cn == null || !cn.isExpanded()) continue;
                 double sum = 0.0;
@@ -116,6 +117,7 @@ public class MctsSearchTest {
             if (!node.isExpanded()) continue;
             for (int i = 0; i < node.edgeCount; i++) {
                 ActionEdge edge = node.edges[node.edgeIds[i]];
+                if (edge == null) continue; // not yet visited (lazy creation)
                 ChanceNode cn = edge.chanceNode;
                 if (cn == null || !cn.isExpanded()) continue;
                 // Placement on empty board with k=0: roll 1 fails, rolls 2-6 succeed → 2 outcomes
