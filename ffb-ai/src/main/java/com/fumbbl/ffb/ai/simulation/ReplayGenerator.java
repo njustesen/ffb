@@ -65,7 +65,7 @@ public class ReplayGenerator {
         @Override public String toString() { return raceName + "(" + teamId + ")"; }
     }
 
-    private static final List<TeamEntry> ALL_ENTRIES = Collections.unmodifiableList(Arrays.asList(
+    static final List<TeamEntry> ALL_ENTRIES = Collections.unmodifiableList(Arrays.asList(
         new TeamEntry("teamAmazonKalimar",       "setups/setup_amazon_Kalimar.xml",        "amazon"),
         new TeamEntry("teamChaosBattleLore",      "setups/setup_chaos_BattleLore.xml",      "chaos"),
         new TeamEntry("teamChaosDwarfKalimar",    "setups/setup_chaos_dwarf_Kalimar.xml",   "chaos_dwarf"),

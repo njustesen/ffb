@@ -27,3 +27,7 @@ stochastic_go/.pytest_cache/
 # Python
 __pycache__/
 *.pyc
+
+# Large data directories (replay files and JSONL shards)
+replays/
+ffb-ml/data/

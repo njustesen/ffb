@@ -76,14 +76,14 @@ public class MatchRunner {
 
     // ── Agent mode ────────────────────────────────────────────────────────────
 
-    public enum AgentMode { RANDOM, SCRIPTED_SAMPLE, SCRIPTED_ARGMAX }
+    public enum AgentMode { RANDOM, SCRIPTED_SAMPLE, SCRIPTED_ARGMAX, MODEL }
 
     // ── Teams (Human vs Human) ────────────────────────────────────────────────
 
-    private static final String HOME_TEAM_ID = "teamHumanKalimar";
-    private static final String AWAY_TEAM_ID  = "teamHumanBattleLore";
-    private static final String HOME_SETUP    = "setups/setup_human_Kalimar.xml";
-    private static final String AWAY_SETUP    = "setups/setup_human_BattleLore.xml";
+    static final String HOME_TEAM_ID = "teamHumanKalimar";
+    static final String AWAY_TEAM_ID  = "teamHumanBattleLore";
+    static final String HOME_SETUP    = "setups/setup_human_Kalimar.xml";
+    static final String AWAY_SETUP    = "setups/setup_human_BattleLore.xml";
 
     private static final int MAX_ITERATIONS = 100_000;
 
@@ -340,12 +340,30 @@ public class MatchRunner {
     private final CapturingClientCommunication comm = new CapturingClientCommunication();
     private final Random rng = new Random();
 
+    /** Optional collector for training data; null = disabled (normal operation). */
+    private ITrainingDataCollector collector;
+
+    /** Optional ONNX model agents (one per side; null = not using MODEL mode for that side). */
+    private OnnxModelAgent homeModelAgent;
+    private OnnxModelAgent awayModelAgent;
+
     public MatchRunner(TeamSetup homeSetup, TeamSetup awaySetup,
                        AgentMode homeMode, AgentMode awayMode) {
         this.homeSetup = homeSetup;
         this.awaySetup = awaySetup;
         this.homeMode  = homeMode;
         this.awayMode  = awayMode;
+    }
+
+    /** Attach a training-data collector.  Must be called before {@link #runGame}. */
+    public void setCollector(ITrainingDataCollector collector) {
+        this.collector = collector;
+    }
+
+    /** Attach ONNX model agents for MODEL mode.  Must be called before {@link #runGame}. */
+    public void setModelAgents(OnnxModelAgent homeAgent, OnnxModelAgent awayAgent) {
+        this.homeModelAgent = homeAgent;
+        this.awayModelAgent = awayAgent;
     }
 
     /** Run a single game. If timingOut is non-null, its [0] element is set to the collected timings. */
@@ -593,11 +611,19 @@ public class MatchRunner {
                     long actStart = System.nanoTime();
                     Team myTeam  = home ? game.getTeamHome() : game.getTeamAway();
                     Team oppTeam = home ? game.getTeamAway() : game.getTeamHome();
-                    boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX);
-                    MoveDecisionEngine.PlayerSelection sel = MoveDecisionEngine.selectPlayer(
-                        game, myTeam, oppTeam, home, home, rng, argmax);
+                    MoveDecisionEngine.PlayerSelection sel;
+                    if (mode == AgentMode.MODEL) {
+                        OnnxModelAgent agent = home ? homeModelAgent : awayModelAgent;
+                        sel = (agent != null)
+                            ? agent.selectPlayer(game, myTeam, oppTeam, home, home)
+                            : MoveDecisionEngine.selectPlayer(game, myTeam, oppTeam, home, home, rng, true);
+                    } else {
+                        boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX);
+                        sel = MoveDecisionEngine.selectPlayer(game, myTeam, oppTeam, home, home, rng, argmax);
+                    }
                     t.activations++;
                     t.activationNs += System.nanoTime() - actStart;
+                    if (collector != null) collector.onPlayerSelect(game, sel, mode.name());
                     if (sel.player == null) {
                         inject(gameState, new ClientCommandEndTurn(game.getTurnMode(), null));
                     } else {
@@ -661,9 +687,17 @@ public class MatchRunner {
         PlayerAction action = ap.getPlayerAction();
 
         if (action == PlayerAction.MOVE || action == PlayerAction.FOUL_MOVE) {
-            boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX);
-            MoveDecisionEngine.MoveResult mr = MoveDecisionEngine.selectMoveTarget(
-                game, ap, myTeam, oppTeam, home, rng, argmax);
+            MoveDecisionEngine.MoveResult mr;
+            if (mode == AgentMode.MODEL) {
+                OnnxModelAgent agent = home ? homeModelAgent : awayModelAgent;
+                mr = (agent != null)
+                    ? agent.selectMoveTarget(game, ap, myTeam, oppTeam, home)
+                    : MoveDecisionEngine.selectMoveTarget(game, ap, myTeam, oppTeam, home, rng, true);
+            } else {
+                boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX);
+                mr = MoveDecisionEngine.selectMoveTarget(game, ap, myTeam, oppTeam, home, rng, argmax);
+            }
+            if (collector != null) collector.onMoveTarget(game, ap, mr, mode.name());
             PathProbabilityFinder.PathEntry entry = mr.chosen;
             if (entry == null || entry.path == null || entry.path.length == 0) {
                 // If no candidates at all (hasEndOption=false), the server may reject deselect
@@ -682,7 +716,7 @@ public class MatchRunner {
             inject(gameState, new ClientCommandMove(ap.getPlayerId(), fromSend, pathSend, null));
 
         } else if (action == PlayerAction.BLITZ) {
-            boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX);
+            boolean argmax = (mode == AgentMode.SCRIPTED_ARGMAX || mode == AgentMode.MODEL);
             if (ap.getCurrentMove() > 0) {
                 // Player has already moved this BLITZ activation — try to block now.
                 FieldCoordinate pos = game.getFieldModel().getPlayerCoordinate(ap.getPlayer());
@@ -698,8 +732,17 @@ public class MatchRunner {
                 return;
             }
             // Haven't moved yet — navigate toward a target.
-            PathProbabilityFinder.PathEntry entry = MoveDecisionEngine.selectMoveTarget(
-                game, ap, myTeam, oppTeam, home, rng, argmax).chosen;
+            MoveDecisionEngine.MoveResult blitzMr;
+            if (mode == AgentMode.MODEL) {
+                OnnxModelAgent agent = home ? homeModelAgent : awayModelAgent;
+                blitzMr = (agent != null)
+                    ? agent.selectMoveTarget(game, ap, myTeam, oppTeam, home)
+                    : MoveDecisionEngine.selectMoveTarget(game, ap, myTeam, oppTeam, home, rng, true);
+            } else {
+                blitzMr = MoveDecisionEngine.selectMoveTarget(game, ap, myTeam, oppTeam, home, rng, argmax);
+            }
+            if (collector != null) collector.onMoveTarget(game, ap, blitzMr, mode.name());
+            PathProbabilityFinder.PathEntry entry = blitzMr.chosen;
             if (entry == null || entry.path == null || entry.path.length == 0) {
                 // Can't or shouldn't move — try an immediate block if adjacent.
                 FieldCoordinate pos = game.getFieldModel().getPlayerCoordinate(ap.getPlayer());
@@ -888,8 +931,16 @@ public class MatchRunner {
                 if (mode == AgentMode.RANDOM) {
                     RandomStrategy.respondToDialog(dialog, game, comm);
                 } else {
-                    ScriptedStrategy.setTemperature(mode == AgentMode.SCRIPTED_ARGMAX ? 0.0 : 0.5);
+                    // MODEL mode falls through to ScriptedStrategy argmax for dialog
+                    // (dialog execution is coupled to ScriptedStrategy's command dispatch)
+                    double temp = (mode == AgentMode.SCRIPTED_ARGMAX || mode == AgentMode.MODEL) ? 0.0 : 0.5;
+                    ScriptedStrategy.setTemperature(temp);
+                    if (collector != null) ScriptedStrategy.startLogging();
                     ScriptedStrategy.respondToDialog(dialog, game, comm);
+                    if (collector != null) {
+                        com.fumbbl.ffb.ai.strategy.DecisionLog dlog = ScriptedStrategy.getAndClearLog();
+                        collector.onDialog(dialog, game, dlog, mode.name());
+                    }
                 }
 
                 ClientCommand captured = comm.getCapturedCommand();

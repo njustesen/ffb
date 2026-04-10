@@ -48,7 +48,7 @@ public final class MoveDecisionEngine {
         public final List<Player<?>> candidatePlayers;
         public final List<PlayerAction> candidateActions;
 
-        PlayerSelection(Player<?> player, PlayerAction action,
+        public PlayerSelection(Player<?> player, PlayerAction action,
                 double[] rawScores, List<Player<?>> candidatePlayers,
                 List<PlayerAction> candidateActions) {
             this.player = player;
@@ -73,7 +73,7 @@ public final class MoveDecisionEngine {
         public final boolean isReceiver;
         public final FieldCoordinate playerCoord;
 
-        MoveResult(PathProbabilityFinder.PathEntry chosen,
+        public MoveResult(PathProbabilityFinder.PathEntry chosen,
                 List<FieldCoordinate> candidates, double[] rawScores,
                 boolean hasEndOption, boolean isBallCarrier, boolean isBallRetriever,
                 boolean isReceiver, FieldCoordinate playerCoord) {

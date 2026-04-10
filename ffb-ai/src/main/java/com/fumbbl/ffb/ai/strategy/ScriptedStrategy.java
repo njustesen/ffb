@@ -82,14 +82,37 @@ public final class ScriptedStrategy {
         temperature = t;
     }
 
+    // ── Optional per-thread decision logging (for training data collection) ──────
+
+    private static final ThreadLocal<DecisionLog> LOG = new ThreadLocal<>();
+
+    /** Enable decision logging for the current thread. Call before {@link #respondToDialog}. */
+    public static void startLogging() { LOG.set(new DecisionLog()); }
+
+    /**
+     * Retrieve and clear the decision log for the current thread.
+     * Returns {@code null} if logging was not started.
+     */
+    public static DecisionLog getAndClearLog() {
+        DecisionLog log = LOG.get();
+        LOG.remove();
+        return log;
+    }
+
     /** Sample from the mixed distribution over a score array. */
     private static int pick(double[] scores, double baseTemp) {
-        return PolicySampler.sampleMixed(scores, baseTemp, temperature, RNG);
+        int chosen = PolicySampler.sampleMixed(scores, baseTemp, temperature, RNG);
+        DecisionLog log = LOG.get();
+        if (log != null) log.add(scores, chosen);
+        return chosen;
     }
 
     /** Binary mixed-distribution choice between scoreTrue and scoreFalse. */
     private static boolean pickBool(double scoreTrue, double scoreFalse, double baseTemp) {
-        return PolicySampler.chooseBoolMixed(scoreTrue, scoreFalse, baseTemp, temperature, RNG);
+        boolean choice = PolicySampler.chooseBoolMixed(scoreTrue, scoreFalse, baseTemp, temperature, RNG);
+        DecisionLog log = LOG.get();
+        if (log != null) log.addBool(scoreTrue, scoreFalse, choice);
+        return choice;
     }
 
     private ScriptedStrategy() {}

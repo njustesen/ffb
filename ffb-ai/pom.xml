@@ -59,5 +59,10 @@
             <artifactId>ffb-server</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.microsoft.onnxruntime</groupId>
+            <artifactId>onnxruntime</artifactId>
+            <version>1.21.0</version>
+        </dependency>
     </dependencies>
 </project>

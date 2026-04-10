@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ffb": {
+      "command": "python3",
+      "args": ["/Users/noju/niels/ffb/ffb-mcp/server.py"]
+    }
+  }
+}
