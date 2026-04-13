@@ -45,8 +45,9 @@ public final class GameStateSerializer {
      */
     public static JsonObject serialize(Game game) {
         JsonObject out = new JsonObject();
-        out.add("half",     game.getHalf());
-        out.add("turn_mode", game.getTurnMode() == null ? "UNKNOWN" : game.getTurnMode().name());
+        out.add("half",       game.getHalf());
+        out.add("turn_nr",    game.getTurnData() != null ? game.getTurnData().getTurnNr() : 0);
+        out.add("turn_mode",  game.getTurnMode() == null ? "UNKNOWN" : game.getTurnMode().name());
         out.add("home_playing", game.isHomePlaying());
 
         FieldModel fm = game.getFieldModel();
@@ -307,6 +308,21 @@ public final class GameStateSerializer {
             obj.add("apothecaries", team.getApothecaries());
             obj.add("bribes",      0);
         }
+
+        // SPP earned so far this game (summed from live PlayerResult records)
+        int sppSoFar = 0;
+        if (game.getGameResult() != null) {
+            boolean isHome = team == game.getTeamHome();
+            com.fumbbl.ffb.model.TeamResult tr = isHome
+                ? game.getGameResult().getTeamResultHome()
+                : game.getGameResult().getTeamResultAway();
+            if (tr != null) {
+                for (com.fumbbl.ffb.model.Player<?> p : team.getPlayers()) {
+                    sppSoFar += tr.getPlayerResult(p).totalEarnedSpps();
+                }
+            }
+        }
+        obj.add("spp_earned", sppSoFar);
 
         return obj;
     }

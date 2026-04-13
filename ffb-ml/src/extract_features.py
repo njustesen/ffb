@@ -574,6 +574,89 @@ def process_move_target(rec, vocab):
     }
 
 
+def process_value(rec, vocab):
+    """
+    Returns dict of arrays for one value-prediction record.
+
+    All targets are DELTAS from the current state to game end, from the acting
+    team's perspective. Using deltas avoids the model trivially copying the
+    current score/cas/spp from the state features.
+
+      win_label       float32  1.0 = acting team wins, 0.5 = draw, 0.0 = loses
+      delta_score     float32  future TDs scored by acting team − future TDs conceded
+      delta_cas_suf   float32  future cas suffered by opponent − future cas suffered by acting team
+                               (positive = acting team causes more future damage)
+      delta_spp       float32  future SPP earned by acting team − future SPP earned by opponent
+    """
+    state = rec.get("state", {})
+    home_playing = state.get("home_playing", True)
+    # Value records are snapped at turn start — no specific acting player
+    x_spatial = extract_spatial(state, vocab, home_playing, acting_player_id=None)
+    x_ns      = extract_nonspatial(state, vocab, home_playing)
+
+    outcome = rec.get("outcome", {})
+
+    # ── Final outcome values (from outcome block) ──────────────────────────────
+    final_score_home = float(outcome.get("score_home",    0))
+    final_score_away = float(outcome.get("score_away",    0))
+    final_cas_suf_h  = float(outcome.get("cas_suf_home",  0))
+    final_cas_suf_a  = float(outcome.get("cas_suf_away",  0))
+    final_spp_home   = float(outcome.get("spp_home",      0))
+    final_spp_away   = float(outcome.get("spp_away",      0))
+
+    # ── Current state values (from serialized game state) ─────────────────────
+    curr_score_home = float(state.get("score_home", 0))
+    curr_score_away = float(state.get("score_away", 0))
+
+    # Current casualties suffered = BH + SI + RIP count visible in player states
+    curr_cas_suf_home = 0.0
+    curr_cas_suf_away = 0.0
+    for p in state.get("players", {}).values():
+        ps = p.get("state", "")
+        if ps in ("BH", "SI", "RIP"):
+            if p.get("team") == "home":
+                curr_cas_suf_home += 1.0
+            else:
+                curr_cas_suf_away += 1.0
+
+    # Current SPP earned this game (added to serialized team data)
+    home_data = state.get("home", {})
+    away_data = state.get("away", {})
+    curr_spp_home = float(home_data.get("spp_earned", 0))
+    curr_spp_away = float(away_data.get("spp_earned", 0))
+
+    # ── Compute deltas ─────────────────────────────────────────────────────────
+    delta_score_home = (final_score_home - curr_score_home) - (final_score_away - curr_score_away)
+    delta_score_away = (final_score_away - curr_score_away) - (final_score_home - curr_score_home)
+
+    # cas_suf delta: how much more will the OPPONENT suffer (= how much more damage we deal)
+    delta_cas_own_h  = (final_cas_suf_a - curr_cas_suf_away) - (final_cas_suf_h - curr_cas_suf_home)
+    delta_cas_own_a  = (final_cas_suf_h - curr_cas_suf_home) - (final_cas_suf_a - curr_cas_suf_away)
+
+    delta_spp_home = (final_spp_home - curr_spp_home) - (final_spp_away - curr_spp_away)
+    delta_spp_away = (final_spp_away - curr_spp_away) - (final_spp_home - curr_spp_home)
+
+    if home_playing:
+        win_label   = 1.0 if final_score_home > final_score_away else (0.5 if final_score_home == final_score_away else 0.0)
+        delta_score = delta_score_home
+        delta_cas   = delta_cas_own_h
+        delta_spp   = delta_spp_home
+    else:
+        win_label   = 1.0 if final_score_away > final_score_home else (0.5 if final_score_home == final_score_away else 0.0)
+        delta_score = delta_score_away
+        delta_cas   = delta_cas_own_a
+        delta_spp   = delta_spp_away
+
+    return {
+        "x_spatial":    x_spatial,
+        "x_ns":         x_ns,
+        "win_label":    np.float32(win_label),
+        "delta_score":  np.float32(np.clip(delta_score, -8, 8)),
+        "delta_cas":    np.float32(np.clip(delta_cas,   -8, 8)),
+        "delta_spp":    np.float32(np.clip(delta_spp,  -30, 30)),
+    }
+
+
 # ── Shard writer ──────────────────────────────────────────────────────────────
 
 def flush_shard(shard_data, out_dir, prefix, shard_idx):
@@ -616,10 +699,11 @@ def main():
     print(f"  Skills: {len(vocab['skills'])}  Dialog types: {len(vocab['dialog_types'])}")
 
     # ── Pass 2: extract features ───────────────────────────────────────────────
-    type_counts = {"dialog": 0, "player_select": 0, "move_target": 0}
-    shard_bufs = {"dialog": [], "player_select": [], "move_target": []}
-    shard_idxs = {"dialog": 0, "player_select": 0, "move_target": 0}
-    prefixes    = {"dialog": "dialog", "player_select": "player_select", "move_target": "move_target"}
+    ALL_TYPES = ["dialog", "player_select", "move_target", "value"]
+    type_counts = {t: 0 for t in ALL_TYPES}
+    shard_bufs  = {t: [] for t in ALL_TYPES}
+    shard_idxs  = {t: 0  for t in ALL_TYPES}
+    prefixes    = {t: t  for t in ALL_TYPES}
 
     for path in jsonl_files:
         print(f"Processing {path.name}...")
@@ -630,8 +714,25 @@ def main():
                 except json.JSONDecodeError:
                     continue
                 t = rec.get("type")
-                if t not in shard_bufs:
+
+                # Dedicated value record — emitted once per turn by JsonlTrainingDataCollector
+                if t == "value":
+                    try:
+                        vdata = process_value(rec, vocab)
+                        shard_bufs["value"].append(vdata)
+                        type_counts["value"] += 1
+                        if len(shard_bufs["value"]) >= args.shard_size:
+                            flush_shard(shard_bufs["value"], out_dir, "value", shard_idxs["value"])
+                            shard_idxs["value"] += 1
+                            shard_bufs["value"] = []
+                    except Exception as e:
+                        print(f"  WARNING line {line_no} (value): {e}", file=sys.stderr)
                     continue
+
+                if t not in ("dialog", "player_select", "move_target"):
+                    continue
+
+                # Policy record
                 try:
                     if t == "dialog":
                         data = process_dialog(rec, vocab)
@@ -639,20 +740,17 @@ def main():
                         data = process_player_select(rec, vocab)
                     else:
                         data = process_move_target(rec, vocab)
+                    shard_bufs[t].append(data)
+                    type_counts[t] += 1
+                    if len(shard_bufs[t]) >= args.shard_size:
+                        flush_shard(shard_bufs[t], out_dir, prefixes[t], shard_idxs[t])
+                        shard_idxs[t] += 1
+                        shard_bufs[t] = []
                 except Exception as e:
-                    print(f"  WARNING line {line_no}: {e}", file=sys.stderr)
-                    continue
-
-                shard_bufs[t].append(data)
-                type_counts[t] += 1
-
-                if len(shard_bufs[t]) >= args.shard_size:
-                    flush_shard(shard_bufs[t], out_dir, prefixes[t], shard_idxs[t])
-                    shard_idxs[t] += 1
-                    shard_bufs[t] = []
+                    print(f"  WARNING line {line_no} ({t}): {e}", file=sys.stderr)
 
     # Flush remaining
-    for t in shard_bufs:
+    for t in ALL_TYPES:
         flush_shard(shard_bufs[t], out_dir, prefixes[t], shard_idxs[t])
 
     print("\n=== Feature extraction complete ===")

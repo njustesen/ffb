@@ -183,6 +183,21 @@ class BCModel(nn.Module):
         c3 = cnn_ch[-1]  # output channels of CNN (last entry)
         self.move_target_head = SpatialMoveHead(c3, rep_dim)
 
+        # Value head: shared trunk → four scalar predictions
+        #   win_logit    — raw logit for win probability (BCE loss)
+        #   score_margin — regression: acting team TDs − opponent TDs at game end
+        #   cas_margin   — regression: acting team cas inflicted − opponent
+        #   spp_earned   — regression: SPP earned by acting team this game
+        value_hidden = max(64, hidden // 2)
+        self.value_trunk = nn.Sequential(
+            nn.Linear(rep_dim, value_hidden),
+            nn.ReLU(),
+        )
+        self.win_head   = nn.Linear(value_hidden, 1)
+        self.score_head = nn.Linear(value_hidden, 1)
+        self.cas_head   = nn.Linear(value_hidden, 1)
+        self.spp_head   = nn.Linear(value_hidden, 1)
+
         self.k = k
         self.rep_dim = rep_dim
         self.dialog_feat_dim = dialog_feat_dim
@@ -310,6 +325,13 @@ class BCModel(nn.Module):
         if "candidate_mask" in batch:
             out["move_target_log_probs"] = self.move_target_scores(
                 rep, cnn_feat, batch["candidate_mask"])
+
+        if "win_label" in batch:
+            v = self.value_trunk(rep)
+            out["win_logit"]    = self.win_head(v).squeeze(-1)    # (B,)
+            out["score_pred"]   = self.score_head(v).squeeze(-1)  # (B,)
+            out["cas_pred"]     = self.cas_head(v).squeeze(-1)    # (B,)
+            out["spp_pred"]     = self.spp_head(v).squeeze(-1)    # (B,)
 
         return out
 

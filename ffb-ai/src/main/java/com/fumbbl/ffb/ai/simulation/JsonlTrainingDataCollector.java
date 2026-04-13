@@ -17,26 +17,43 @@ import com.fumbbl.ffb.dialog.DialogSkillUseParameter;
 import com.fumbbl.ffb.dialog.DialogUseApothecaryParameter;
 import com.fumbbl.ffb.model.ActingPlayer;
 import com.fumbbl.ffb.model.Game;
+import com.fumbbl.ffb.model.GameResult;
 import com.fumbbl.ffb.model.Player;
+import com.fumbbl.ffb.model.PlayerResult;
+import com.fumbbl.ffb.model.TeamResult;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * {@link ITrainingDataCollector} that appends one JSON line per decision to a {@link BufferedWriter}.
+ * {@link ITrainingDataCollector} that buffers one JSON object per decision, then on
+ * {@link #onGameEnd} annotates every record with the game outcome and flushes to the writer.
  *
- * <p>Three record types are emitted, distinguished by the {@code "type"} field:
+ * <p>Records are discarded (not written) if the game timed out (result == null).
+ *
+ * <p>Four record types are emitted, distinguished by the {@code "type"} field:
  * <ul>
  *   <li>{@code "dialog"}         — ScriptedStrategy dialog response</li>
  *   <li>{@code "player_select"}  — MoveDecisionEngine player selection</li>
  *   <li>{@code "move_target"}    — MoveDecisionEngine move target</li>
  * </ul>
+ *
+ * <p>Every record also carries an {@code "outcome"} object (added at game end) with the
+ * following fields, all from the <em>home team's perspective</em>:
+ * <ul>
+ *   <li>{@code score_home} / {@code score_away}  — final touchdown counts</li>
+ *   <li>{@code cas_home}   / {@code cas_away}    — casualties <em>inflicted</em> (caused on opponent)</li>
+ *   <li>{@code cas_suf_home} / {@code cas_suf_away} — casualties <em>suffered</em> (BH+SI+RIP)</li>
+ *   <li>{@code spp_home}   / {@code spp_away}    — total SPP earned this game by each team</li>
+ * </ul>
  */
 public final class JsonlTrainingDataCollector implements ITrainingDataCollector {
 
     private final BufferedWriter writer;
+    private final List<JsonObject> buffer = new ArrayList<>();
 
     public JsonlTrainingDataCollector(BufferedWriter writer) {
         this.writer = writer;
@@ -72,7 +89,7 @@ public final class JsonlTrainingDataCollector implements ITrainingDataCollector 
         rec.add("dialog_param", serializeDialogParam(dialog));
         rec.add("state",        GameStateSerializer.serialize(game));
 
-        writeLine(rec);
+        buffer.add(rec);
     }
 
     // ── Player select ─────────────────────────────────────────────────────────
@@ -122,7 +139,7 @@ public final class JsonlTrainingDataCollector implements ITrainingDataCollector 
         rec.add("end_turn_option", true); // always an option
 
         rec.add("state", GameStateSerializer.serialize(game));
-        writeLine(rec);
+        buffer.add(rec);
     }
 
     // ── Move target ───────────────────────────────────────────────────────────
@@ -175,7 +192,107 @@ public final class JsonlTrainingDataCollector implements ITrainingDataCollector 
         rec.add("candidates", coords);
 
         rec.add("state", GameStateSerializer.serialize(game));
-        writeLine(rec);
+        buffer.add(rec);
+    }
+
+    // ── Game end ──────────────────────────────────────────────────────────────
+
+    @Override
+    public void onGameEnd(GameResult result) {
+        if (result == null) {
+            buffer.clear(); // timed-out game — discard
+            return;
+        }
+
+        JsonObject outcome = buildOutcome(result);
+        try {
+            // Emit at most one value record per (half, turn_nr, home_playing) tuple.
+            // Keep the first record encountered in each turn — the earliest decision
+            // in the turn is the least correlated with others in the same turn.
+            // All records are still written as policy training examples (unchanged).
+            java.util.Set<String> seenTurns = new java.util.HashSet<>();
+            for (JsonObject rec : buffer) {
+                // Write the policy record unconditionally
+                writer.write(rec.toString());
+                writer.newLine();
+
+                // Write a value record only for the first decision in each turn
+                JsonValue stateVal = rec.get("state");
+                if (stateVal != null && stateVal.isObject()) {
+                    JsonObject state = stateVal.asObject();
+                    int half        = state.getInt("half",        0);
+                    int turnNr      = state.getInt("turn_nr",     0);
+                    boolean homePlaying = state.getBoolean("home_playing", true);
+                    String turnKey  = half + ":" + turnNr + ":" + homePlaying;
+                    if (seenTurns.add(turnKey)) {
+                        // First decision in this turn — emit a value record
+                        JsonObject valueRec = new JsonObject();
+                        valueRec.add("type",    "value");
+                        valueRec.add("state",   stateVal);
+                        valueRec.add("outcome", outcome);
+                        writer.write(valueRec.toString());
+                        writer.newLine();
+                    }
+                }
+            }
+            writer.flush();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        } finally {
+            buffer.clear();
+        }
+    }
+
+    /** Build the outcome object from the home team's perspective. */
+    private static JsonObject buildOutcome(GameResult result) {
+        JsonObject o = new JsonObject();
+        o.add("score_home", result.getScoreHome());
+        o.add("score_away", result.getScoreAway());
+
+        TeamResult home = result.getTeamResultHome();
+        TeamResult away = result.getTeamResultAway();
+
+        // Casualties suffered (BH + SI + RIP) — happens to the team itself
+        int casSufHome = home.getBadlyHurtSuffered()
+                       + home.getSeriousInjurySuffered()
+                       + home.getRipSuffered();
+        int casSufAway = away.getBadlyHurtSuffered()
+                       + away.getSeriousInjurySuffered()
+                       + away.getRipSuffered();
+        o.add("cas_suf_home", casSufHome);
+        o.add("cas_suf_away", casSufAway);
+
+        // Casualties inflicted (caused on opponent) — sum over player results
+        int casHome = 0, casAway = 0;
+        if (home.getTeam() != null) {
+            for (com.fumbbl.ffb.model.Player<?> p : home.getTeam().getPlayers()) {
+                casHome += home.getPlayerResult(p).getCasualties();
+            }
+        }
+        if (away.getTeam() != null) {
+            for (com.fumbbl.ffb.model.Player<?> p : away.getTeam().getPlayers()) {
+                casAway += away.getPlayerResult(p).getCasualties();
+            }
+        }
+        o.add("cas_home", casHome);
+        o.add("cas_away", casAway);
+
+        // Total SPP earned this game by each team
+        int sppHome = 0, sppAway = 0;
+        if (home.getTeam() != null) {
+            for (com.fumbbl.ffb.model.Player<?> p : home.getTeam().getPlayers()) {
+                sppHome += home.getPlayerResult(p).totalEarnedSpps();
+            }
+        }
+        if (away.getTeam() != null) {
+            for (com.fumbbl.ffb.model.Player<?> p : away.getTeam().getPlayers()) {
+                sppAway += away.getPlayerResult(p).totalEarnedSpps();
+            }
+        }
+        o.add("spp_home", sppHome);
+        o.add("spp_away", sppAway);
+
+        return o;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -277,12 +394,4 @@ public final class JsonlTrainingDataCollector implements ITrainingDataCollector 
         return p;
     }
 
-    private void writeLine(JsonObject rec) {
-        try {
-            writer.write(rec.toString());
-            writer.newLine();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
 }

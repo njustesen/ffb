@@ -36,7 +36,9 @@ The game starts when both coaches have chosen a team.
 | **ffb-client-logic** | Platform-agnostic client logic: server command processing, game-phase state machines, 150+ dialog handlers. Uses Tyrus WebSocket client. |
 | **ffb-client** | AWT/Swing UI layer. Layer-based field rendering, `UserInterface`, `IconCache`, `ActionKeyBindings`. |
 | **ffb-resources** | Packaged sound and icon assets JAR. |
-| **ffb-ai** | Headless AI agent. Extends the client, suppresses the UI window, and drives every game decision programmatically (random strategy). |
+| **ffb-ai** | AI agents and headless simulation harness. See below. |
+| **ffb-mcp** | Python MCP server exposing game management, replay pipeline, and ML training as Claude tools. |
+| **ffb-ml** | Python ML pipeline: feature extraction, BC model training, ONNX export, and evaluation. |
 
 ---
 
@@ -105,13 +107,13 @@ version-specific classes. The local server is configured to run **BB2025** rules
 
 ## AI Agent (`ffb-ai`)
 
-The `ffb-ai` module provides a headless AI client that can play a full game
-without any human interaction or visible UI.
+The `ffb-ai` module provides two AI agent modes and a headless simulation harness.
 
-### Entry Point
+### WebSocket Agent
+
+A headless client that connects to a running server over WebSocket. Entry point: `com.fumbbl.ffb.ai.AiMain`.
 
 ```
-com.fumbbl.ffb.ai.AiMain
   -coach     <coachname>    Coach name (must exist in the DB)
   -password  <password>     Plain-text password
   -server    <hostname>     Server hostname (default: localhost)
@@ -119,55 +121,125 @@ com.fumbbl.ffb.ai.AiMain
   -home                     Pass this flag for the home-side player
 ```
 
-### Key Classes
+`AiDecisionEngine` polls every 100 ms. It drives all game decisions via:
+- **`ScriptedStrategy`** — scores all dialog types (block dice, re-rolls, fouls, apothecary, etc.) and samples decisions using a piecewise-linear temperature: `T=0` → argmax, `T=0.5` → softmax (default), `T=1` → uniform random.
+- **`MoveDecisionEngine`** / **`PathProbabilityFinder`** — scores player actions and target squares using path probability and field-position heuristics.
+
+### Headless Simulation
+
+A fully in-process game engine — no network, no database, no Swing. A complete game runs in ~500 ms.
+
+Key classes:
 
 | Class | Role |
 |---|---|
-| `AiClient` | Extends `FantasyFootballClientAwt`, hides the UI window, starts `AiDecisionEngine` as a daemon thread. |
-| `AiDecisionEngine` | Polls every 100 ms. Handles login (via reflection into `LoginLogicModule`), responds to server dialogs, and drives active-state actions. |
-| `RandomStrategy` | Stateless helper — maps every `IDialogParameter` type to a valid (randomly chosen) response sent via `ClientCommunication`. |
-| `GameSimulator` | Clones a `Game` state via JSON round-trip for forward-search planning (foundation; search not yet implemented). |
+| `SimulationLoop` | Drives a `GameState` to completion by injecting commands directly into the step stack. Synchronous; no threads or polling. |
+| `HeadlessGameSetup` | Constructs a fully-initialised `GameState` from XML rosters — no DB required. |
+| `HeadlessFantasyFootballServer` | Minimal server stub: all network and persistence calls are no-ops. |
+| `CapturingClientCommunication` | Intercepts dialog responses and converts them to server-side `ReceivedCommand` objects instead of sending over the network. |
+| `MatchRunner` | Runs N games across agent pairings (Sample vs Random, Argmax vs Random, Sample vs Argmax, Random vs Random) and prints win rates with 95% Wilson CI. |
+| `ReplayGenerator` | Parallel multi-threaded generator — writes headless games as gzip-compressed `.ffbr` replay files. Supports race filtering and temperature control. |
+| `TrainingDataExporter` | Exports per-decision JSONL training data (dialog, player-select, move-target) from headless games. |
+| `GameStateSerializer` | Serializes full `GameState` snapshots (board, players, scores) to JSON for training data and replays. |
+| `FeatureExtractor` | Java-side feature extraction: converts serialized game state into board channels, non-spatial vectors, and player-encoder inputs matching the Python model's input spec. |
+| `OnnxModelAgent` | Loads three exported ONNX BC models (dialog, player-select, move-target) and uses them as the agent policy in evaluation. Falls back to `ScriptedStrategy` for dialog when needed. |
+| `EvalRunner` | Evaluates the trained BC model against Random and ScriptedArgmax baselines across multiple conditions. |
 
-### Running AI Games
+### Running the Headless Simulation
 
 ```bash
-# Human vs AI
-./play.sh --ai
+mvn install -DskipTests -pl ffb-ai -am
+mvn -pl ffb-ai exec:java \
+  -Dexec.mainClass=com.fumbbl.ffb.ai.simulation.MatchRunner \
+  -Dexec.args="/path/to/repo 200"
+```
 
-# AI vs AI (fully headless)
-./play-ai-vs-ai.sh
-# Logs: /tmp/ffb-ai-kalimar.log, /tmp/ffb-ai-battlelore.log, /tmp/ffb-server.log
+Runs 200 games per condition and prints win rates with 95% Wilson CI and per-level timing statistics.
+
+```bash
+mvn -pl ffb-ai exec:java \
+  -Dexec.mainClass=com.fumbbl.ffb.ai.simulation.ReplayGenerator \
+  -Dexec.args="--output ./replays --games 1000 --threads 4"
+```
+
+```bash
+mvn -pl ffb-ai exec:java \
+  -Dexec.mainClass=com.fumbbl.ffb.ai.simulation.TrainingDataExporter \
+  -Dexec.args="--output ffb-ml/data --games 500"
 ```
 
 ---
 
-## Headless Simulation (`ffb-ai/simulation`)
+## ML Pipeline (`ffb-ml`)
 
-The simulation package provides a fully in-memory game engine — no network, no database,
-no Swing window. A complete game runs in ~9 ms.
+Python pipeline for training a Behavioral Cloning (BC) model from headless-simulation data.
 
-### Key Classes
+### Model
 
-| Class | Role |
+Three decision heads share a CNN+MLP backbone:
+
+| Head | Task |
 |---|---|
-| `SimulationLoop` | Drives a `GameState` to completion by injecting commands directly into the server-side step stack. Synchronous; no threads or polling delays. Safety cap: 100 000 iterations. |
-| `HeadlessGameSetup` | Constructs a fully-initialised `GameState` from XML rosters — mirrors `ServerCommandHandlerJoinApproved`, no DB required. |
-| `HeadlessFantasyFootballServer` | Minimal server stub: all network and persistence calls are no-ops. Uses sentinel sessions to distinguish home vs. away. |
-| `GameSimulator` | Clones a `Game` via JSON round-trip — foundation for forward-search planning (search not yet implemented). |
-| `CapturingClientCommunication` | Intercepts dialog responses from `RandomStrategy` and converts them to server-side `ReceivedCommand` objects instead of sending them over the network. |
-| `SimulationBenchmark` | Runs N complete games (default 20) and reports per-step CPU-time breakdowns. |
+| `dialog_head` | Per-dialog-type linear → softmax over discrete options |
+| `player_select_head` | Scores each candidate player individually via a `PlayerEncoder` |
+| `move_target_head` | Spatial CNN head — scores all 26×15 board squares, masked to reachable positions |
 
-### Running the benchmark
+`PlayerEncoder` embeds skills (learned embeddings, mean-pooled) and normalised stats (MA/ST/AG/AV/PA) into a shared player representation trained end-to-end.
+
+Three model scales are supported: `micro`, `small`, `medium`.
+
+### Pipeline Steps
 
 ```bash
-java -cp "ffb-ai/target/ffb-ai-*.jar:ffb-server/target/lib/*" \
-     com.fumbbl.ffb.ai.simulation.SimulationBenchmark .
+# 1. Extract numpy feature shards from JSONL training data
+python ffb-ml/src/extract_features.py --input ffb-ml/data --output ffb-ml/features
+
+# 2. Train the BC model
+python ffb-ml/src/train.py \
+  --features ffb-ml/features --output ffb-ml/checkpoints --scale small
+
+# 3. Export to ONNX (three files: dialog, player_select, move_target)
+python ffb-ml/src/export_model.py \
+  --checkpoint ffb-ml/checkpoints/small_best.pt \
+  --output /tmp/bc_model
+
+# 4. Evaluate the ONNX model in the Java simulation
+mvn -pl ffb-ai exec:java \
+  -Dexec.mainClass=com.fumbbl.ffb.ai.simulation.EvalRunner \
+  -Dexec.args="--model /tmp/bc_model --vocab ffb-ml/features/vocab.json --games 100"
 ```
 
-Output includes per-game setup/kickoff/drive timing, per-turn microseconds, and the
-top-20 hottest steps by accumulated CPU time.
+A value-head scaling sweep (win/score/casualties/SPP prediction) can be run with:
 
-### Extending the AI
+```bash
+bash run_value_sweep.sh
+```
 
-Replace `RandomStrategy` with your own implementation to plug in a smarter decision engine.
-`GameSimulator` is the scaffolding for forward-search (MCTS, minimax, etc.).
+---
+
+## MCP Server (`ffb-mcp`)
+
+A Python [MCP](https://modelcontextprotocol.io) server that exposes game management,
+simulation, and the full ML training pipeline as tools callable by Claude.
+
+### Starting the MCP server
+
+```bash
+cd ffb-mcp
+pip install mcp
+python server.py
+```
+
+### Tool Groups
+
+| Group | Description |
+|---|---|
+| Team management | `list_teams`, `get_team`, `create_team`, `list_rosters`, `get_roster` |
+| Coach DB | `list_coaches`, `create_coach`, `delete_coach`, `set_coach_password` |
+| Server control | `start_server`, `stop_server`, `server_status`, `build_project` |
+| Game management | `schedule_game`, `list_games`, `get_game`, `get_game_state`, `get_game_result`, `close_game`, `delete_game`, `concede_game` |
+| Match launchers | `run_human_vs_human`, `run_human_vs_ai`, `run_ai_vs_ai`, `run_match_runner`, `run_games_batch` |
+| Replay pipeline | `generate_replays`, `download_replays`, `parse_replays`, `replay_status` |
+
+The MCP server can drive the entire BC training loop — from game generation through
+feature extraction, training, and ONNX export — without leaving Claude.

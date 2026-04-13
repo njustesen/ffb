@@ -6,6 +6,7 @@ import com.fumbbl.ffb.ai.MoveDecisionEngine;
 import com.fumbbl.ffb.ai.strategy.DecisionLog;
 import com.fumbbl.ffb.model.ActingPlayer;
 import com.fumbbl.ffb.model.Game;
+import com.fumbbl.ffb.model.GameResult;
 
 /**
  * Callback interface for collecting per-decision training data during headless simulation.
@@ -47,4 +48,15 @@ public interface ITrainingDataCollector {
      * @param agentMode agent mode string
      */
     void onMoveTarget(Game game, ActingPlayer ap, MoveDecisionEngine.MoveResult mr, String agentMode);
+
+    /**
+     * Called once after the game finishes. Implementations should retroactively annotate all
+     * buffered records with the game outcome and flush them to storage.
+     *
+     * <p>All outcome values are from the <em>home team's perspective</em>. Feature extraction
+     * flips the sign when the away team was acting.
+     *
+     * @param result the completed game result (null if the game timed out — discard buffered records)
+     */
+    void onGameEnd(GameResult result);
 }

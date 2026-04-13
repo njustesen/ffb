@@ -198,7 +198,9 @@ public class TrainingDataExporter {
 
         com.fumbbl.ffb.model.GameResult result = runner.runGame(gs);
 
-        // null = timed out
+        // onGameEnd flushes buffered records (or discards on timeout)
+        collector.onGameEnd(result);
+
         return result != null;
     }
 
