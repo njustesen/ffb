@@ -41,10 +41,19 @@ import com.fumbbl.ffb.util.UtilPlayer;
 
 import org.eclipse.jetty.websocket.api.Session;
 
+import ai.onnxruntime.OrtException;
+import com.eclipsesource.json.Json;
+import com.eclipsesource.json.JsonObject;
+
 import java.io.File;
+import java.io.FileReader;
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -76,7 +85,8 @@ public class MatchRunner {
 
     // ── Agent mode ────────────────────────────────────────────────────────────
 
-    public enum AgentMode { RANDOM, SCRIPTED_SAMPLE, SCRIPTED_ARGMAX, MODEL }
+    public enum AgentMode { RANDOM, SCRIPTED_SAMPLE, SCRIPTED_ARGMAX, MODEL,
+                            MCTS_UCB, MCTS_PRIOR }
 
     // ── Teams (Human vs Human) ────────────────────────────────────────────────
 
@@ -86,6 +96,30 @@ public class MatchRunner {
     static final String AWAY_SETUP    = "setups/setup_human_BattleLore.xml";
 
     private static final int MAX_ITERATIONS = 100_000;
+
+    /**
+     * Steps that belong to the kickoff phase (post-TD or half-time drive setup).
+     * If a rollout reaches any of these, the current turn has ended naturally —
+     * the rollout should stop rather than trying to handle kickoff dialogs.
+     */
+    private static final Set<StepId> KICKOFF_STEPS = EnumSet.of(
+        StepId.SETUP,
+        StepId.INIT_KICKOFF,
+        StepId.KICKOFF,
+        StepId.KICKOFF_ANIMATION,
+        StepId.KICKOFF_RESULT_ROLL,
+        StepId.KICKOFF_RETURN,
+        StepId.KICKOFF_SCATTER_ROLL,
+        StepId.KICKOFF_SCATTER_ROLL_ASK_AFTER,
+        StepId.APPLY_KICKOFF_RESULT,
+        StepId.END_KICKOFF,
+        StepId.BLITZ_TURN,
+        StepId.MASTER_CHEF,
+        StepId.PRAYER,
+        StepId.PRAYERS,
+        StepId.SWARMING,
+        StepId.TOUCHBACK
+    );
 
     // ── Timing container ──────────────────────────────────────────────────────
 
@@ -109,6 +143,8 @@ public class MatchRunner {
         final AgentMode homeMode, awayMode;
         int homeWins, awayWins, draws, errors;
         final List<GameTimings> timings = new ArrayList<>();
+        /** Aggregated MCTS search stats (null for non-MCTS conditions). */
+        com.fumbbl.ffb.ai.mcts.BbMctsStats mctsStats;
 
         ConditionResult(String label, AgentMode homeMode, AgentMode awayMode) {
             this.label = label;
@@ -129,11 +165,65 @@ public class MatchRunner {
             ? new File(args[0])
             : new File(System.getProperty("user.dir")).getParentFile();
         int n = args.length > 1 ? Integer.parseInt(args[1]) : 200;
+        int mctsBudget = 0;
+        long mctsTimeMs = 0;
+        int mctsThreads    = Runtime.getRuntime().availableProcessors(); // count-based (E/F)
+        int mctsTimeThreads = Runtime.getRuntime().availableProcessors(); // time-based (G/H)
+        boolean mctsVsArgmax = false;   // also run E2/F2 / G2/H2: MCTS vs Argmax
+        boolean mctsCrossTurn = false;  // enable cross-turn tree search (G3/H3 conditions)
+        String  leafEvalMode = "static"; // "static" or "onnx"
+        String  onnxValuePath = null;    // path to value.onnx
+        String  onnxVocabPath = null;    // path to vocab.json for FeatureExtractor
+        for (int i = 0; i < args.length - 1; i++) {
+            if ("--mcts-budget".equals(args[i])) {
+                mctsBudget = Integer.parseInt(args[i + 1]);
+            } else if ("--mcts-time-ms".equals(args[i])) {
+                mctsTimeMs = Long.parseLong(args[i + 1]);
+            } else if ("--mcts-threads".equals(args[i])) {
+                mctsThreads = Integer.parseInt(args[i + 1]);
+            } else if ("--time-threads".equals(args[i])) {
+                mctsTimeThreads = Integer.parseInt(args[i + 1]);
+            } else if ("--leaf-eval".equals(args[i])) {
+                leafEvalMode = args[i + 1];
+            } else if ("--onnx-value".equals(args[i])) {
+                onnxValuePath = args[i + 1];
+            } else if ("--onnx-vocab".equals(args[i])) {
+                onnxVocabPath = args[i + 1];
+            }
+        }
+        for (String arg : args) {
+            if ("--mcts-vs-argmax".equals(arg)) mctsVsArgmax = true;
+            if ("--mcts-cross-turn".equals(arg)) mctsCrossTurn = true;
+        }
+
+        // Load ONNX value leaf eval if requested
+        com.fumbbl.ffb.ai.mcts.ILeafEval onnxLeafEval = null;
+        if ("onnx".equals(leafEvalMode) && onnxValuePath != null && onnxVocabPath != null) {
+            try (FileReader fr = new FileReader(onnxVocabPath)) {
+                JsonObject vocabRoot = Json.parse(fr).asObject();
+                Map<String, Integer> skillVocab = new HashMap<>();
+                for (JsonObject.Member m : vocabRoot.get("skills").asObject()) {
+                    skillVocab.put(m.getName(), m.getValue().asInt());
+                }
+                int nDialogTypes = vocabRoot.get("dialog_types").asObject().size();
+                FeatureExtractor extractor = new FeatureExtractor(skillVocab, nDialogTypes);
+                onnxLeafEval = new OnnxLeafEval(onnxValuePath, extractor);
+                System.out.println("ONNX leaf eval loaded: " + onnxValuePath);
+            } catch (Exception e) {
+                System.err.println("WARNING: failed to load ONNX leaf eval: " + e.getMessage());
+            }
+        }
+
+        // Force line-buffered output when stdout is a pipe (Maven exec:java buffers by default).
+        System.setOut(new java.io.PrintStream(System.out, true));
 
         File serverDir = new File(projectRoot, "ffb-server");
         System.out.println("=== MatchRunner: Human vs Human comparative experiment ===");
         System.out.println("Server dir : " + serverDir.getAbsolutePath());
         System.out.println("Games/cond : " + n);
+        if (mctsBudget > 0) System.out.println("MCTS budget: " + mctsBudget);
+        if (mctsTimeMs > 0) System.out.println("MCTS time  : " + mctsTimeMs + "ms/decision" + (mctsCrossTurn ? " + cross-turn" : ""));
+        System.out.println("MCTS threads (count): " + mctsThreads + "  (time): " + mctsTimeThreads + "  (available: " + Runtime.getRuntime().availableProcessors() + ")");
         System.out.println();
 
         HeadlessFantasyFootballServer server = new HeadlessFantasyFootballServer();
@@ -149,7 +239,7 @@ public class MatchRunner {
         System.out.println("done.");
         System.out.println();
 
-        // ── Four conditions ───────────────────────────────────────────────────
+        // ── Four scripted conditions ──────────────────────────────────────────
 
         ConditionResult condA = runCondition("A: Sample  vs Random ",
             AgentMode.SCRIPTED_SAMPLE, AgentMode.RANDOM,
@@ -167,8 +257,230 @@ public class MatchRunner {
             AgentMode.RANDOM, AgentMode.RANDOM,
             homeSetup, awaySetup, server, serverDir, n);
 
+        // ── Optional MCTS conditions ──────────────────────────────────────────
+
+        List<ConditionResult> allConds = new ArrayList<>();
+        allConds.add(condA); allConds.add(condB); allConds.add(condC); allConds.add(condD);
+
+        if (mctsBudget > 0) {
+            // Hint GC to reclaim A-D game state before allocating 12 parallel MCTS contexts.
+            System.gc();
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            MatchRunner scriptedRunner = new MatchRunner(homeSetup, awaySetup,
+                AgentMode.SCRIPTED_ARGMAX, AgentMode.SCRIPTED_ARGMAX);
+
+            // Condition E: MCTS with plain UCB (no prior)
+            com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsUcbAgent =
+                new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner, mctsBudget);
+            mctsUcbAgent.setMaxThreads(mctsThreads);
+
+            ConditionResult condE = runMctsCondition("E: MCTS-UCB    vs Random ",
+                AgentMode.MCTS_UCB, AgentMode.RANDOM,
+                mctsUcbAgent, null,
+                homeSetup, awaySetup, server, serverDir, n);
+            allConds.add(condE);
+
+            // Condition F: MCTS with scripted action ordering (Script prior)
+            com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsScriptedAgent =
+                new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner, mctsBudget);
+            mctsScriptedAgent.setActionPrior(new com.fumbbl.ffb.ai.mcts.ScriptedActionPrior());
+            mctsScriptedAgent.setMaxThreads(mctsThreads);
+
+            ConditionResult condF = runMctsCondition("F: MCTS-Prior  vs Random ",
+                AgentMode.MCTS_PRIOR, AgentMode.RANDOM,
+                mctsScriptedAgent, null,
+                homeSetup, awaySetup, server, serverDir, n);
+            allConds.add(condF);
+
+            // Conditions E2/F2: MCTS vs Argmax (head-to-head quality check)
+            if (mctsVsArgmax) {
+                com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsUcbVsArgmax =
+                    new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner, mctsBudget);
+                mctsUcbVsArgmax.setMaxThreads(mctsThreads);
+
+                ConditionResult condE2 = runMctsCondition("E2: MCTS-UCB    vs Argmax ",
+                    AgentMode.MCTS_UCB, AgentMode.SCRIPTED_ARGMAX,
+                    mctsUcbVsArgmax, null,
+                    homeSetup, awaySetup, server, serverDir, n);
+                allConds.add(condE2);
+
+                com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsPriorVsArgmax =
+                    new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner, mctsBudget);
+                mctsPriorVsArgmax.setActionPrior(new com.fumbbl.ffb.ai.mcts.ScriptedActionPrior());
+                mctsPriorVsArgmax.setMaxThreads(mctsThreads);
+
+                ConditionResult condF2 = runMctsCondition("F2: MCTS-Prior  vs Argmax ",
+                    AgentMode.MCTS_PRIOR, AgentMode.SCRIPTED_ARGMAX,
+                    mctsPriorVsArgmax, null,
+                    homeSetup, awaySetup, server, serverDir, n);
+                allConds.add(condF2);
+
+                // Conditions I/J: MCTS with ONNX value leaf eval vs Argmax
+                if (onnxLeafEval != null) {
+                    com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsUcbOnnx =
+                        new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner, mctsBudget);
+                    mctsUcbOnnx.setMaxThreads(mctsThreads);
+                    mctsUcbOnnx.setLeafEval(onnxLeafEval);
+
+                    ConditionResult condI = runMctsCondition("I:  MCTS-UCB+ONNX vs Argmax ",
+                        AgentMode.MCTS_UCB, AgentMode.SCRIPTED_ARGMAX,
+                        mctsUcbOnnx, null,
+                        homeSetup, awaySetup, server, serverDir, n);
+                    allConds.add(condI);
+
+                    com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsPriorOnnx =
+                        new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner, mctsBudget);
+                    mctsPriorOnnx.setActionPrior(new com.fumbbl.ffb.ai.mcts.ScriptedActionPrior());
+                    mctsPriorOnnx.setMaxThreads(mctsThreads);
+                    mctsPriorOnnx.setLeafEval(onnxLeafEval);
+
+                    ConditionResult condJ = runMctsCondition("J:  MCTS-Prior+ONNX vs Argmax ",
+                        AgentMode.MCTS_PRIOR, AgentMode.SCRIPTED_ARGMAX,
+                        mctsPriorOnnx, null,
+                        homeSetup, awaySetup, server, serverDir, n);
+                    allConds.add(condJ);
+                }
+            }
+        }
+
+        if (mctsTimeMs > 0) {
+            MatchRunner scriptedRunner = new MatchRunner(homeSetup, awaySetup,
+                AgentMode.SCRIPTED_ARGMAX, AgentMode.SCRIPTED_ARGMAX);
+
+            // Condition G: MCTS-UCB with time budget vs Random
+            com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsUcbTimed =
+                new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner);
+            mctsUcbTimed.setTimeBudgetMs(mctsTimeMs);
+            mctsUcbTimed.setMaxThreads(mctsTimeThreads);
+
+            ConditionResult condG = runMctsCondition("G: MCTS-UCB    vs Random (time)",
+                AgentMode.MCTS_UCB, AgentMode.RANDOM,
+                mctsUcbTimed, null,
+                homeSetup, awaySetup, server, serverDir, n);
+            allConds.add(condG);
+
+            // Condition H: MCTS-Prior with time budget vs Random
+            com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsScriptedTimed =
+                new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner);
+            mctsScriptedTimed.setActionPrior(new com.fumbbl.ffb.ai.mcts.ScriptedActionPrior());
+            mctsScriptedTimed.setTimeBudgetMs(mctsTimeMs);
+            mctsScriptedTimed.setMaxThreads(mctsTimeThreads);
+
+            ConditionResult condH = runMctsCondition("H: MCTS-Prior  vs Random (time)",
+                AgentMode.MCTS_PRIOR, AgentMode.RANDOM,
+                mctsScriptedTimed, null,
+                homeSetup, awaySetup, server, serverDir, n);
+            allConds.add(condH);
+
+            // Conditions G2/H2: time-based MCTS vs Argmax (head-to-head quality check)
+            if (mctsVsArgmax) {
+                com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsUcbTimedVsArgmax =
+                    new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner);
+                mctsUcbTimedVsArgmax.setTimeBudgetMs(mctsTimeMs);
+                mctsUcbTimedVsArgmax.setMaxThreads(mctsTimeThreads);
+
+                ConditionResult condG2 = runMctsCondition("G2: MCTS-UCB    vs Argmax (time)",
+                    AgentMode.MCTS_UCB, AgentMode.SCRIPTED_ARGMAX,
+                    mctsUcbTimedVsArgmax, null,
+                    homeSetup, awaySetup, server, serverDir, n);
+                allConds.add(condG2);
+
+                com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsPriorTimedVsArgmax =
+                    new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner);
+                mctsPriorTimedVsArgmax.setActionPrior(new com.fumbbl.ffb.ai.mcts.ScriptedActionPrior());
+                mctsPriorTimedVsArgmax.setTimeBudgetMs(mctsTimeMs);
+                mctsPriorTimedVsArgmax.setMaxThreads(mctsTimeThreads);
+
+                ConditionResult condH2 = runMctsCondition("H2: MCTS-Prior  vs Argmax (time)",
+                    AgentMode.MCTS_PRIOR, AgentMode.SCRIPTED_ARGMAX,
+                    mctsPriorTimedVsArgmax, null,
+                    homeSetup, awaySetup, server, serverDir, n);
+                allConds.add(condH2);
+            }
+
+            // Conditions G3/H3: time-based MCTS with cross-turn search vs Argmax
+            if (mctsCrossTurn && mctsVsArgmax) {
+                com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsUcbCrossTurn =
+                    new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner);
+                mctsUcbCrossTurn.setTimeBudgetMs(mctsTimeMs);
+                mctsUcbCrossTurn.setMaxThreads(mctsTimeThreads);
+                mctsUcbCrossTurn.setCrossTurnSearch(true);
+
+                ConditionResult condG3 = runMctsCondition("G3: MCTS-UCB+XT  vs Argmax (time)",
+                    AgentMode.MCTS_UCB, AgentMode.SCRIPTED_ARGMAX,
+                    mctsUcbCrossTurn, null,
+                    homeSetup, awaySetup, server, serverDir, n);
+                allConds.add(condG3);
+
+                com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsPriorCrossTurn =
+                    new com.fumbbl.ffb.ai.mcts.BbMctsSearch(server, scriptedRunner);
+                mctsPriorCrossTurn.setActionPrior(new com.fumbbl.ffb.ai.mcts.ScriptedActionPrior());
+                mctsPriorCrossTurn.setTimeBudgetMs(mctsTimeMs);
+                mctsPriorCrossTurn.setMaxThreads(mctsTimeThreads);
+                mctsPriorCrossTurn.setCrossTurnSearch(true);
+
+                ConditionResult condH3 = runMctsCondition("H3: MCTS-Prior+XT vs Argmax (time)",
+                    AgentMode.MCTS_PRIOR, AgentMode.SCRIPTED_ARGMAX,
+                    mctsPriorCrossTurn, null,
+                    homeSetup, awaySetup, server, serverDir, n);
+                allConds.add(condH3);
+            }
+        }
+
         // ── Print results ─────────────────────────────────────────────────────
-        printReport(n, condA, condB, condC, condD);
+        printReport(n, allConds.toArray(new ConditionResult[0]));
+    }
+
+    private static ConditionResult runMctsCondition(String label,
+            AgentMode homeMode, AgentMode awayMode,
+            com.fumbbl.ffb.ai.mcts.BbMctsSearch homeMcts,
+            com.fumbbl.ffb.ai.mcts.BbMctsSearch awayMcts,
+            TeamSetup homeSetup, TeamSetup awaySetup,
+            HeadlessFantasyFootballServer server,
+            File serverDir, int n) throws Exception {
+
+        System.out.printf("Running condition %s (%d games)...%n", label.trim(), n);
+        ConditionResult result = new ConditionResult(label, homeMode, awayMode);
+        MatchRunner runner = new MatchRunner(homeSetup, awaySetup, homeMode, awayMode);
+        runner.setMctsAgents(homeMcts, awayMcts);
+
+        long condStart = System.nanoTime();
+        for (int i = 1; i <= n; i++) {
+            long gameStart = System.nanoTime();
+            GameState gs = HeadlessGameSetup.create(server, HOME_TEAM_ID, AWAY_TEAM_ID, serverDir);
+            GameTimings[] timingOut = new GameTimings[1];
+            GameResult gr;
+            try {
+                gr = runner.runGame(gs, timingOut);
+            } catch (RuntimeException e) {
+                result.errors++;
+                continue;
+            }
+            if (gr == null) { result.errors++; continue; }
+            int hs = gr.getScoreHome(), as = gr.getScoreAway();
+            if      (hs > as) result.homeWins++;
+            else if (as > hs) result.awayWins++;
+            else              result.draws++;
+            result.timings.add(timingOut[0]);
+            {
+                long elapsed = System.nanoTime() - condStart;
+                long gameMs = (System.nanoTime() - gameStart) / 1_000_000;
+                System.out.printf("  [%d/%d] %s %dms  W/D/L: %d/%d/%d  elapsed: %.0fs%n",
+                    i, n, label.trim(), gameMs,
+                    result.homeWins, result.draws, result.awayWins,
+                    elapsed / 1e9);
+            }
+        }
+        System.out.printf("  Done: %dW / %dD / %dL (%d errors)%n",
+            result.homeWins, result.draws, result.awayWins, result.errors);
+
+        // Collect and aggregate MCTS stats from the agent(s).
+        com.fumbbl.ffb.ai.mcts.BbMctsSearch activeAgent = (homeMcts != null) ? homeMcts : awayMcts;
+        if (activeAgent != null) {
+            activeAgent.getStats().computeDerived();
+            result.mctsStats = activeAgent.getStats();
+        }
+        return result;
     }
 
     private static ConditionResult runCondition(String label,
@@ -280,6 +592,28 @@ public class MatchRunner {
             System.out.printf("  %-16s  %16s  %s%n",
                 modeName(mode), String.format("%.2f ± %.2f", mean, sd), from);
         }
+        // ── MCTS search statistics ─────────────────────────────────────────────
+        boolean hasMcts = false;
+        for (ConditionResult c : conds) {
+            if (c.mctsStats != null) { hasMcts = true; break; }
+        }
+        if (hasMcts) {
+            System.out.println();
+            System.out.println("MCTS Search Statistics:");
+            System.out.printf("  %-22s  %12s  %12s  %12s  %12s  %12s  %12s%n",
+                "Condition", "iter/s", "ms/iter", "ms/dec", "avg depth", "max depth", "nodes/dec");
+            System.out.println("  " + "-".repeat(104));
+            for (ConditionResult c : conds) {
+                if (c.mctsStats == null) continue;
+                com.fumbbl.ffb.ai.mcts.BbMctsStats s = c.mctsStats;
+                double msPerIter = s.avgIterationMs;
+                double msPerDec  = s.decisions > 0 ? s.totalSearchNs / 1e6 / s.decisions : 0;
+                double nodesPerDec = s.decisions > 0 ? (double) s.totalNodes / s.decisions : 0;
+                System.out.printf("  %-22s  %12.0f  %12.3f  %12.1f  %12.1f  %12d  %12.1f%n",
+                    c.label, s.itersPerSecond, msPerIter, msPerDec,
+                    s.avgDepth, s.maxDepth, nodesPerDec);
+            }
+        }
         System.out.println();
     }
 
@@ -288,6 +622,8 @@ public class MatchRunner {
             case SCRIPTED_SAMPLE: return "Sample";
             case SCRIPTED_ARGMAX: return "Argmax";
             case RANDOM:          return "Random";
+            case MCTS_UCB:        return "MCTS-UCB";
+            case MCTS_PRIOR:      return "MCTS-Prior";
             default:              return mode.name();
         }
     }
@@ -347,6 +683,10 @@ public class MatchRunner {
     private OnnxModelAgent homeModelAgent;
     private OnnxModelAgent awayModelAgent;
 
+    /** Optional MCTS search agents (one per side; null = not using MCTS mode for that side). */
+    private com.fumbbl.ffb.ai.mcts.BbMctsSearch homeMctsAgent;
+    private com.fumbbl.ffb.ai.mcts.BbMctsSearch awayMctsAgent;
+
     public MatchRunner(TeamSetup homeSetup, TeamSetup awaySetup,
                        AgentMode homeMode, AgentMode awayMode) {
         this.homeSetup = homeSetup;
@@ -364,6 +704,13 @@ public class MatchRunner {
     public void setModelAgents(OnnxModelAgent homeAgent, OnnxModelAgent awayAgent) {
         this.homeModelAgent = homeAgent;
         this.awayModelAgent = awayAgent;
+    }
+
+    /** Attach MCTS agents for {@code MCTS_UCB} / {@code MCTS_PRIOR} mode.  Must be called before {@link #runGame}. */
+    public void setMctsAgents(com.fumbbl.ffb.ai.mcts.BbMctsSearch homeAgent,
+                              com.fumbbl.ffb.ai.mcts.BbMctsSearch awayAgent) {
+        this.homeMctsAgent = homeAgent;
+        this.awayMctsAgent = awayAgent;
     }
 
     /** Run a single game. If timingOut is non-null, its [0] element is set to the collected timings. */
@@ -611,6 +958,24 @@ public class MatchRunner {
                     long actStart = System.nanoTime();
                     Team myTeam  = home ? game.getTeamHome() : game.getTeamAway();
                     Team oppTeam = home ? game.getTeamAway() : game.getTeamHome();
+
+                    if (mode == AgentMode.MCTS_UCB || mode == AgentMode.MCTS_PRIOR) {
+                        com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsAgent = home ? homeMctsAgent : awayMctsAgent;
+                        if (mctsAgent != null) {
+                            com.fumbbl.ffb.ai.mcts.BbAction best = mctsAgent.selectActivation(game, home);
+                            t.activations++;
+                            t.activationNs += System.nanoTime() - actStart;
+                            if (best.isEndTurn()) {
+                                inject(gameState, new ClientCommandEndTurn(game.getTurnMode(), null));
+                            } else {
+                                inject(gameState, new ClientCommandActingPlayer(
+                                    best.player.getId(), best.action, false));
+                            }
+                            break;
+                        }
+                        // Fall through to scripted argmax if no agent attached.
+                    }
+
                     MoveDecisionEngine.PlayerSelection sel;
                     if (mode == AgentMode.MODEL) {
                         OnnxModelAgent agent = home ? homeModelAgent : awayModelAgent;
@@ -1009,6 +1374,10 @@ public class MatchRunner {
     }
 
     private void placeReserves(Game game, GameState gameState) {
+        if (homeSetup == null || awaySetup == null) {
+            // No setup files available (e.g., MCTS rollout in GUI mode) — skip placement.
+            return;
+        }
         boolean homePlaying = game.isHomePlaying();
         Team team = homePlaying ? game.getTeamHome() : game.getTeamAway();
         FieldModel fm = game.getFieldModel();
@@ -1066,17 +1435,233 @@ public class MatchRunner {
 
     // ── Injection helpers ─────────────────────────────────────────────────────
 
-    private static void inject(GameState gameState, ClientCommand cmd) {
+    public static void inject(GameState gameState, ClientCommand cmd) {
         boolean home = gameState.getGame().isHomePlaying();
         Session session = home ? HeadlessFantasyFootballServer.HOME_SESSION
                                : HeadlessFantasyFootballServer.AWAY_SESSION;
         gameState.handleCommand(new ReceivedCommand(cmd, session));
     }
 
-    private static void injectForTeam(GameState gameState, ClientCommand cmd, boolean homeTeam) {
+    public static void injectForTeam(GameState gameState, ClientCommand cmd, boolean homeTeam) {
         Session session = homeTeam ? HeadlessFantasyFootballServer.HOME_SESSION
                                    : HeadlessFantasyFootballServer.AWAY_SESSION;
         gameState.handleCommand(new ReceivedCommand(cmd, session));
+    }
+
+    /**
+     * Run simulation for at most {@code maxActivations} player activations
+     * (INIT_SELECTING phase-1 visits), then stop.  Intended for MCTS rollouts.
+     *
+     * <p>The caller is responsible for having already injected the first
+     * {@code ClientCommandActingPlayer} (phase-1 injection of the candidate).
+     * This method drives from that point onward until either the activation
+     * budget is exhausted or the game ends.
+     *
+     * @param gameState     state to drive (must have INIT_SELECTING as current step)
+     * @param maxActivations number of additional phase-1 INIT_SELECTING visits before stopping
+     */
+    public void runForActivations(GameState gameState, int maxActivations) {
+        Game game = gameState.getGame();
+        int activationsRemaining = maxActivations;
+        int iter = 0;
+
+        // Dummy timing containers (rollouts don't track timing).
+        GameTimings dummyTimings = new GameTimings();
+        long[] dummyPs = new long[]{0L, 0L, 0L};
+
+        // Minimal stuck-detectors to avoid infinite loops in rollouts.
+        StepId generalStuckStep = null;
+        int generalStuckCount = 0;
+        int generalEndTurnCount = 0;
+        final int MAX_GENERAL_REPEATS = 30;
+        final int MAX_END_TURN_RETRIES = 3;
+
+        while (game.getFinished() == null && ++iter < MAX_ITERATIONS) {
+            IStep step = gameState.getCurrentStep();
+            if (step == null) break;
+
+            IDialogParameter dialog = game.getDialogParameter();
+            StepId stepId = step.getId();
+
+            // A kickoff-phase step means a TD was scored / half ended — end rollout.
+            if (KICKOFF_STEPS.contains(stepId)) {
+                break;
+            }
+
+            // Check activation budget at phase-1 entry.
+            if (stepId == StepId.INIT_SELECTING && dialog == null) {
+                ActingPlayer ap = game.getActingPlayer();
+                if (ap == null || ap.getPlayerId() == null) {
+                    if (activationsRemaining <= 0) break;
+                    activationsRemaining--;
+                }
+            }
+
+            // Stuck-step guard.
+            if (stepId != StepId.INIT_SELECTING && dialog == null) {
+                if (stepId == generalStuckStep) {
+                    if (++generalStuckCount >= MAX_GENERAL_REPEATS) {
+                        if (++generalEndTurnCount >= MAX_END_TURN_RETRIES) {
+                            break;
+                        }
+                        inject(gameState, new ClientCommandEndTurn(game.getTurnMode(), null));
+                        generalStuckCount = 0;
+                        continue;
+                    }
+                } else {
+                    generalStuckStep = stepId;
+                    generalStuckCount = 1;
+                    generalEndTurnCount = 0;
+                }
+            } else {
+                generalStuckStep = null;
+                generalStuckCount = 0;
+                generalEndTurnCount = 0;
+            }
+
+            if (dialog != null && stepId != StepId.INIT_SELECTING) {
+                handleDialog(dialog, game, gameState, dummyTimings);
+            } else {
+                handleStep(stepId, game, gameState, dummyTimings, dummyPs);
+            }
+        }
+    }
+
+    /**
+     * Maximum step-loop iterations for a single activation advance in MCTS rollouts.
+     * Legitimate activations (move + block/foul cascade) complete in &lt;200 steps;
+     * capping at 500 prevents stuck activations from looping indefinitely while
+     * leaving a safe margin for unusual sequences.
+     */
+    public static final int MAX_ACTIVATION_ITERATIONS = 500;
+
+    /**
+     * Drive all sub-steps of the current activation until the next phase-1
+     * {@code INIT_SELECTING} or until the turn ends.
+     *
+     * <p>Stops <em>before</em> handling the next phase-1 {@code INIT_SELECTING}
+     * so the caller retains control over which player to activate next.
+     *
+     * @param gameState   the game state to advance
+     * @param isHome      which team is the acting team for this turn
+     * @param maxIter     maximum step-loop iterations before returning {@code false};
+     *                    use {@link #MAX_ITERATIONS} for full-game simulation or
+     *                    {@link #MAX_ACTIVATION_ITERATIONS} for MCTS rollouts
+     * @return {@code true} if stopped at a phase-1 INIT_SELECTING for {@code isHome}'s
+     *         team (turn continues); {@code false} if the turn ended, switched teams,
+     *         game finished, or iteration cap reached
+     */
+    public boolean advanceToNextActivationOrTurnEnd(GameState gameState, boolean isHome,
+                                                    int maxIter) {
+        Game game = gameState.getGame();
+        int iter = 0;
+
+        GameTimings dummyTimings = new GameTimings();
+        long[] dummyPs = new long[]{0L, 0L, 0L};
+
+        StepId generalStuckStep = null;
+        int generalStuckCount = 0;
+        int generalEndTurnCount = 0;
+        final int MAX_GENERAL_REPEATS = 30;
+        // After this many EndTurn injections on the same stuck step without progress,
+        // give up and treat as turn-end.  Limits worst-case to MAX_GENERAL_REPEATS ×
+        // MAX_END_TURN_RETRIES = 90 iterations per stuck step, not 100,000.
+        final int MAX_END_TURN_RETRIES = 3;
+
+        while (game.getFinished() == null && ++iter < maxIter) {
+            IStep step = gameState.getCurrentStep();
+            if (step == null) return false;
+
+            IDialogParameter dialog = game.getDialogParameter();
+            StepId stepId = step.getId();
+
+            // A kickoff-phase step means a TD was scored / half ended — treat as turn end.
+            if (KICKOFF_STEPS.contains(stepId)) {
+                return false;
+            }
+
+            // Stop at phase-1 INIT_SELECTING — let the caller decide the next action.
+            if (stepId == StepId.INIT_SELECTING && dialog == null) {
+                ActingPlayer ap = game.getActingPlayer();
+                if (ap == null || ap.getPlayerId() == null) {
+                    // Phase 1: return whether the same team is still acting.
+                    return game.isHomePlaying() == isHome;
+                }
+            }
+
+            // Stuck-step guard.
+            if (stepId != StepId.INIT_SELECTING && dialog == null) {
+                if (stepId == generalStuckStep) {
+                    if (++generalStuckCount >= MAX_GENERAL_REPEATS) {
+                        if (++generalEndTurnCount >= MAX_END_TURN_RETRIES) {
+                            // EndTurn hasn't helped — treat as turn-end boundary.
+                            return false;
+                        }
+                        inject(gameState, new ClientCommandEndTurn(game.getTurnMode(), null));
+                        generalStuckCount = 0;
+                        continue;
+                    }
+                } else {
+                    generalStuckStep = stepId;
+                    generalStuckCount = 1;
+                    generalEndTurnCount = 0;
+                }
+            } else {
+                generalStuckStep = null;
+                generalStuckCount = 0;
+                generalEndTurnCount = 0;
+            }
+
+            if (dialog != null && stepId != StepId.INIT_SELECTING) {
+                handleDialog(dialog, game, gameState, dummyTimings);
+            } else {
+                handleStep(stepId, game, gameState, dummyTimings, dummyPs);
+            }
+        }
+        return false;
+    }
+
+    /** Convenience overload using the full {@link #MAX_ITERATIONS} cap (normal simulation). */
+    public boolean advanceToNextActivationOrTurnEnd(GameState gameState, boolean isHome) {
+        return advanceToNextActivationOrTurnEnd(gameState, isHome, MAX_ITERATIONS);
+    }
+
+    /**
+     * Drive the remaining activations of a turn to completion using scripted-argmax
+     * player selection, starting from the current {@code INIT_SELECTING} phase-1
+     * decision point.
+     *
+     * <p>Unlike {@link #advanceToNextActivationOrTurnEnd}, which stops <em>before</em>
+     * the next phase-1 {@code INIT_SELECTING}, this method handles {@code INIT_SELECTING}
+     * internally and loops until the turn ends or the game is over.  It is used by the
+     * MCTS rollout simulation step to complete a turn after expanding a new tree node.
+     *
+     * @param gameState the rollout game state; must be at a phase-1 {@code INIT_SELECTING}
+     *                  for {@code isHome}'s team when called
+     * @param isHome    which team's turn is being driven
+     */
+    public void advanceTurnEndScripted(GameState gameState, boolean isHome) {
+        Game game = gameState.getGame();
+        int safetyIter = 0;
+        final int MAX_ACTIVATIONS = 20; // Blood Bowl: ≤11 players + some safety margin
+
+        while (game.getFinished() == null && safetyIter++ < MAX_ACTIVATIONS) {
+            // We are at INIT_SELECTING phase 1 for isHome's team.
+            // Apply scripted-argmax activation selection.
+            Team myTeam  = isHome ? game.getTeamHome() : game.getTeamAway();
+            Team oppTeam = isHome ? game.getTeamAway() : game.getTeamHome();
+            MoveDecisionEngine.PlayerSelection sel =
+                MoveDecisionEngine.selectPlayer(game, myTeam, oppTeam, isHome, isHome, rng, true);
+            if (sel.player == null) {
+                inject(gameState, new ClientCommandEndTurn(game.getTurnMode(), null));
+            } else {
+                inject(gameState, new ClientCommandActingPlayer(
+                    sel.player.getId(), sel.action, false));
+            }
+            // Advance through sub-steps until the next INIT_SELECTING phase 1 or turn end.
+            boolean sameTurn = advanceToNextActivationOrTurnEnd(gameState, isHome);
+            if (!sameTurn) return;
+        }
     }
 
 }
