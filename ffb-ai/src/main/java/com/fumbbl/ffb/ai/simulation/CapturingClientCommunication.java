@@ -21,11 +21,11 @@ import java.util.Map;
  * dialog responses into {@link com.fumbbl.ffb.server.net.ReceivedCommand} objects that can
  * be injected directly into the server-side {@link com.fumbbl.ffb.server.GameState}.
  */
-class CapturingClientCommunication extends ClientCommunication {
+public class CapturingClientCommunication extends ClientCommunication {
 
     private ClientCommand capturedCommand;
 
-    CapturingClientCommunication() {
+    public CapturingClientCommunication() {
         super(null);
     }
 
@@ -63,11 +63,11 @@ class CapturingClientCommunication extends ClientCommunication {
         this.capturedCommand = new ClientCommandEndTurn(turnMode, coords);
     }
 
-    ClientCommand getCapturedCommand() {
+    public ClientCommand getCapturedCommand() {
         return capturedCommand;
     }
 
-    void clearCaptured() {
+    public void clearCaptured() {
         capturedCommand = null;
     }
 }

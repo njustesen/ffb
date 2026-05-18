@@ -19,20 +19,28 @@ public final class MctsSearch {
     // v^2_term + C^2*logN/(n+1) only when v=0. For non-zero v we still need the
     // actual score, so we compute sqrt but keep the formula straightforward.
     private static final double C_ACTION = 1.41421356237; // sqrt(2)
+    private static final double C_PUCT   = 1.5;           // PUCT exploration constant
 
     private final SearchContext ctx;
     private final Random rng;
+    /** Optional action prior for PUCT.  Null = plain UCB. */
+    private final IActionPrior prior;
 
     // Scratch array for backprop transposition dedup (path length is typically <50)
     private final long[] visitedHashes = new long[256];
 
-    public MctsSearch(SearchContext ctx, Random rng) {
+    public MctsSearch(SearchContext ctx, Random rng, IActionPrior prior) {
         this.ctx = ctx;
         this.rng = rng;
+        this.prior = prior;
+    }
+
+    public MctsSearch(SearchContext ctx, Random rng) {
+        this(ctx, rng, null);
     }
 
     public MctsSearch() {
-        this(new SearchContext(), new Random());
+        this(new SearchContext(), new Random(), null);
     }
 
     public SearchResult search(SGoState rootState, int budget) {
@@ -200,20 +208,36 @@ public final class MctsSearch {
         while (bits != 0L) {
             int cell = Long.numberOfTrailingZeros(bits);
             bits &= bits - 1L;
-            // No ActionEdge object created here — created lazily on first selection
             node.edgeIds[idx++] = cell;
         }
         node.edgeCount = idx;
+
+        // Compute PUCT prior once at expansion time (null prior → UCB mode).
+        if (prior != null) {
+            double[] priorVals = prior.computePrior(node.stateHash, node.edgeIds, node.edgeCount);
+            if (priorVals != null) {
+                node.priors = priorVals;
+            }
+        }
     }
 
     /**
-     * UCB action selection. Returns index into node.edgeIds[].
+     * UCB or PUCT action selection. Returns index into node.edgeIds[].
+     *
+     * <p>Uses PUCT when {@code node.priors != null}:
+     * <pre>U(a) = Q(a) + C_PUCT × P(a) × sqrt(N) / (1 + n(a))</pre>
+     *
+     * <p>Falls back to plain UCB otherwise:
+     * <pre>U(a) = Q(a) + C_ACTION × sqrt(log(N) / (n(a) + 1))</pre>
+     *
      * P1 maximizes, P2 minimizes (flip sign for P2).
-     * Null edges (not yet visited) are treated as unvisited (n=0).
      */
     private int selectAction(StateNode node, int player) {
         int N = node.visitCount + 1;
-        double logN = Math.log(N);
+        boolean usePuct = node.priors != null;
+        double logN = usePuct ? 0.0 : Math.log(N);
+        double sqrtN = usePuct ? Math.sqrt(N) : 0.0;
+
         double bestScore = Double.NEGATIVE_INFINITY;
         int bestIdx = 0;
         int tieCount = 0;
@@ -227,7 +251,14 @@ public final class MctsSearch {
             int n = edge != null ? edge.visitCount : 0;
             double v = n > 0 ? edge.valueSum / n : 0.0;
             if (player != SGoState.P1) v = -v;
-            double score = v + C_ACTION * Math.sqrt(logN / (n + 1));
+
+            double score;
+            if (usePuct) {
+                double p = node.priors[i];
+                score = v + C_PUCT * p * sqrtN / (1 + n);
+            } else {
+                score = v + C_ACTION * Math.sqrt(logN / (n + 1));
+            }
 
             if (score > bestScore) {
                 bestScore = score;
@@ -235,7 +266,6 @@ public final class MctsSearch {
                 tieCount = 1;
             } else if (score == bestScore) {
                 tieCount++;
-                // Reservoir sampling for uniform tie-breaking
                 if (rng.nextInt(tieCount) == 0) bestIdx = i;
             }
         }

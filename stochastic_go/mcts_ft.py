@@ -66,6 +66,9 @@ class StateNode:
     action_edges: Dict[ActionKey, ActionEdge] = field(default_factory=dict)
     visit_count: int = 0
     value_sum: float = 0.0
+    # Optional PUCT prior: maps action key → prior probability.
+    # None means UCB mode; set once at node expansion via game.action_prior().
+    action_priors: Optional[Dict[ActionKey, float]] = None
 
     @property
     def value_estimate(self) -> float:
@@ -159,12 +162,26 @@ class GameInterface:
     def opponent(self, player: int) -> int:
         raise NotImplementedError
 
+    def action_prior(self, state: Any, player: int,
+                     actions: List[ActionKey]) -> Optional[List[float]]:
+        """
+        Optional: return a probability distribution over actions as a prior for PUCT.
+
+        Return a list of floats of the same length as `actions`, summing to ~1.0,
+        or None to fall back to plain UCB exploration.
+
+        Default implementation returns None (UCB mode for all games that don't
+        override this method).
+        """
+        return None
+
 
 # ─────────────────────────────────────────────
 # UCB constant
 # ─────────────────────────────────────────────
 
 C_ACTION = 1.41  # sqrt(2); tune per game
+C_PUCT   = 1.5   # exploration constant for PUCT (when action_prior is set)
 
 
 # ─────────────────────────────────────────────
@@ -216,12 +233,20 @@ def select_outcome(cn: ChanceNode) -> Tuple[StateHash, OutcomeEdge]:
 
 def select_action(node: StateNode, player: int, p1: int) -> Tuple[ActionKey, ActionEdge]:
     """
-    UCB action selection.
-    P1 maximizes value, P2 minimizes (so we flip sign for P2).
+    UCB or PUCT action selection.
+
+    Uses PUCT when node.action_priors is set:
+        U(a) = Q(a) + C_PUCT × P(a) × sqrt(N) / (1 + n(a))
+
+    Falls back to plain UCB otherwise:
+        U(a) = Q(a) + C_ACTION × sqrt(log(N) / (n(a) + 1))
+
+    P1 maximizes value, P2 minimizes (flip sign for P2).
     """
     N = node.visit_count + 1
-    log_N = math.log(N)          # computed once; reused across all edges
-    c = C_ACTION
+    use_puct = node.action_priors is not None
+    sqrt_N = N ** 0.5 if use_puct else None
+    log_N = math.log(N) if not use_puct else None
     best_score = -math.inf
     best: List[Tuple[ActionKey, ActionEdge]] = []
 
@@ -230,7 +255,11 @@ def select_action(node: StateNode, player: int, p1: int) -> Tuple[ActionKey, Act
         v = edge.value_sum / n if n > 0 else 0.0
         if player != p1:
             v = -v
-        score = v + c * (log_N / (n + 1)) ** 0.5
+        if use_puct:
+            prior = node.action_priors.get(action, 0.0)
+            score = v + C_PUCT * prior * sqrt_N / (1 + n)
+        else:
+            score = v + C_ACTION * (log_N / (n + 1)) ** 0.5
         if score > best_score:
             best_score = score
             best = [(action, edge)]
@@ -262,12 +291,17 @@ def traverse_turn(
 
         # Lazy action expansion.
         if not node.action_edges:
-            for action in game.legal_actions(node.state, player):
+            actions = game.legal_actions(node.state, player)
+            for action in actions:
                 edge = ActionEdge(action=action)
                 if game.is_stochastic(node.state, action):
                     edge.chance_node = ChanceNode()
                     ctx.chance_node_count += 1
                 node.action_edges[action] = edge
+            # Set PUCT prior if the game provides one (set once at expansion).
+            raw_priors = game.action_prior(node.state, player, actions)
+            if raw_priors is not None:
+                node.action_priors = {a: p for a, p in zip(actions, raw_priors)}
 
         if not node.action_edges:
             # No legal actions (shouldn't happen in normal play; treat as turn end).

@@ -1,6 +1,9 @@
 package com.fumbbl.ffb.ai;
 
 import com.fumbbl.ffb.ai.client.AiClient;
+import com.fumbbl.ffb.ai.mcts.BbMctsSearch;
+import com.fumbbl.ffb.ai.simulation.HeadlessFantasyFootballServer;
+import com.fumbbl.ffb.ai.simulation.MatchRunner;
 import com.fumbbl.ffb.client.ClientParameters;
 
 /**
@@ -10,11 +13,12 @@ import com.fumbbl.ffb.client.ClientParameters;
  *   java -cp ... com.fumbbl.ffb.ai.AiMain [options]
  *
  * Options:
- *   -coach    &lt;name&gt;   Coach name (default: BattleLore)
- *   -password &lt;pwd&gt;   Password in plain text (default: test)
- *   -server   &lt;host&gt;  Server host (default: localhost)
- *   -port     &lt;port&gt;  Server port (default: 22227)
- *   -home              If present, create the game; otherwise join existing
+ *   -coach       &lt;name&gt;   Coach name (default: BattleLore)
+ *   -password    &lt;pwd&gt;   Password in plain text (default: test)
+ *   -server      &lt;host&gt;  Server host (default: localhost)
+ *   -port        &lt;port&gt;  Server port (default: 22227)
+ *   -home                 If present, create the game; otherwise join existing
+ *   -mcts-budget &lt;N&gt;     Enable MCTS with N rollout iterations per activation
  */
 public class AiMain {
 
@@ -27,6 +31,7 @@ public class AiMain {
         boolean useRandom = false;
         String teamId = null;
         String teamName = null;
+        int mctsBudget = 0;
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -53,6 +58,9 @@ public class AiMain {
                     break;
                 case "-teamName":
                     teamName = args[++i];
+                    break;
+                case "-mcts-budget":
+                    mctsBudget = Integer.parseInt(args[++i]);
                     break;
                 default:
                     System.err.println("Unknown argument: " + args[i]);
@@ -84,8 +92,18 @@ public class AiMain {
             System.exit(1);
         }
 
+        // Build MCTS agent if requested.
+        BbMctsSearch mctsSearch = null;
+        if (mctsBudget > 0) {
+            HeadlessFantasyFootballServer rolloutServer = new HeadlessFantasyFootballServer();
+            MatchRunner rolloutRunner = new MatchRunner(null, null,
+                MatchRunner.AgentMode.SCRIPTED_ARGMAX, MatchRunner.AgentMode.SCRIPTED_ARGMAX);
+            mctsSearch = new BbMctsSearch(rolloutServer, rolloutRunner, mctsBudget);
+            System.out.println("[AiMain] MCTS enabled: budget=" + mctsBudget);
+        }
+
         try {
-            AiClient client = new AiClient(parameters, password, home, useRandom);
+            AiClient client = new AiClient(parameters, password, home, useRandom, mctsSearch);
             client.startClient();
             // Block the main thread so the JVM does not exit
             synchronized (AiMain.class) {

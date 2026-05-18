@@ -9,9 +9,12 @@ Client and server are both implemented in Java 8 with Swing/AWT.
 ## Quick Start (local game)
 
 ```bash
-./play.sh                # Two human clients, each gets a login window
-./play.sh --ai           # One human client (Kalimar) + AI opponent (BattleLore)
-./play-ai-vs-ai.sh       # Fully headless AI-vs-AI game, no windows
+./play.sh                           # Two human clients, each gets a login window
+./play.sh --ai                      # One human client (Kalimar) + AI opponent (BattleLore)
+./play-ai-vs-ai.sh                  # Fully headless AI-vs-AI game, no windows
+./play-mcts.sh                      # Human (Kalimar) vs MCTS AI (BattleLore, default budget 10)
+./play-mcts.sh --mcts-budget 20     # Human vs MCTS AI with 20 rollouts per activation
+./play-ai-vs-ai-mcts.sh             # Fully headless MCTS AI vs MCTS AI
 ```
 
 **Prerequisites (one-time):** MariaDB and Maven via Homebrew. `play.sh` handles
@@ -145,6 +148,25 @@ Key classes:
 | `OnnxModelAgent` | Loads three exported ONNX BC models (dialog, player-select, move-target) and uses them as the agent policy in evaluation. Falls back to `ScriptedStrategy` for dialog when needed. |
 | `EvalRunner` | Evaluates the trained BC model against Random and ScriptedArgmax baselines across multiple conditions. |
 
+### MCTS Agent
+
+The `ffb-ai` module also includes a Blood Bowl MCTS agent (`com.fumbbl.ffb.ai.mcts`):
+
+| Class | Role |
+|---|---|
+| `BbMctsSearch` | Core MCTS search: UCB or PUCT multi-armed bandit over player activations, each arm evaluated via a scripted rollout. |
+| `RolloutSetup` | Bootstraps a mid-game `GameState` from a JSON-cloned `Game` model, ready to accept a player-activation command at `INIT_SELECTING`. |
+| `BbAction` | Candidate player activation: `(player, action)` pair or the `END_TURN` sentinel. |
+| `IActionPrior` | Interface for PUCT action priors. Implement to plug in a learned or scripted distribution. |
+| `ScriptedActionPrior` | Prior derived from the scripted agent's softmax player-selection scores (T=0.5). Used for the `MCTS_SCRIPTED` condition. |
+| `UniformActionPrior` | Uniform prior — reduces PUCT to UCB (baseline). |
+
+Pass `-mcts-budget N` to `AiMain` to enable MCTS (default N=10):
+
+```bash
+java -cp ... com.fumbbl.ffb.ai.AiMain -coach BattleLore -password test -mcts-budget 10
+```
+
 ### Running the Headless Simulation
 
 ```bash
@@ -155,6 +177,14 @@ mvn -pl ffb-ai exec:java \
 ```
 
 Runs 200 games per condition and prints win rates with 95% Wilson CI and per-level timing statistics.
+
+To also run MCTS conditions (UCB and scripted PUCT):
+
+```bash
+mvn -pl ffb-ai exec:java \
+  -Dexec.mainClass=com.fumbbl.ffb.ai.simulation.MatchRunner \
+  "-Dexec.args=/path/to/repo 50 --mcts-budget 10"
+```
 
 ```bash
 mvn -pl ffb-ai exec:java \

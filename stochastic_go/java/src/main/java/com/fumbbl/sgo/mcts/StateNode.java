@@ -25,6 +25,12 @@ public final class StateNode {
     public int visitCount;
     public double valueSum;
 
+    /**
+     * Optional PUCT prior probabilities, parallel with {@link #edgeIds}.
+     * Null = use plain UCB; set once at expansion time when {@link IActionPrior} is provided.
+     */
+    public double[] priors = null;
+
     public StateNode(long stateHash, SGoState state, boolean isTurnEnd) {
         this.stateHash = stateHash;
         this.state = state;

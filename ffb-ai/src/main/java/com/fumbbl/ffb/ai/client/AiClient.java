@@ -1,5 +1,6 @@
 package com.fumbbl.ffb.ai.client;
 
+import com.fumbbl.ffb.ai.mcts.BbMctsSearch;
 import com.fumbbl.ffb.client.ClientParameters;
 import com.fumbbl.ffb.client.FantasyFootballClientAwt;
 
@@ -20,12 +21,18 @@ public class AiClient extends FantasyFootballClientAwt {
     }
 
     public AiClient(ClientParameters parameters, String password, boolean home, boolean useRandom) throws IOException {
+        this(parameters, password, home, useRandom, null);
+    }
+
+    public AiClient(ClientParameters parameters, String password, boolean home,
+                    boolean useRandom, BbMctsSearch mctsSearch) throws IOException {
         super(parameters);
         this.home = home;
         // Hide the Swing window — the AI does not need to render anything.
         getUserInterface().setVisible(false);
         // Start the decision loop as a daemon thread.
         AiDecisionEngine engine = new AiDecisionEngine(this, password, home, useRandom);
+        if (mctsSearch != null) engine.setMctsSearch(mctsSearch);
         Thread engineThread = new Thread(engine, "AI-DecisionEngine");
         engineThread.setDaemon(true);
         engineThread.start();

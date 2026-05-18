@@ -16,6 +16,19 @@ import javax.crypto.spec.SecretKeySpec;
  */
 public class Fortuna {
 
+	/** Pluggable RNG interface for deterministic testing and parity testing. */
+	public interface IDiceRoller {
+		int getDieRoll(int sides);
+	}
+
+	private IDiceRoller delegate;
+
+	/** Replace Fortuna's AES-based RNG with a seeded delegate (e.g. Xoshiro256**). */
+	public void setDelegate(IDiceRoller delegate) {
+		this.delegate = delegate;
+	}
+
+
 	private static int NUMBER_OF_POOLS = 32;
 	private static long MAX_REKEY_DELAY_MS = 1000;
 
@@ -99,6 +112,9 @@ public class Fortuna {
 	}
 
 	public int getDieRoll(int sides) {
+		if (delegate != null) {
+			return delegate.getDieRoll(sides);
+		}
 		int result;
 		assert sides < 256 && sides > 0;
 		do {

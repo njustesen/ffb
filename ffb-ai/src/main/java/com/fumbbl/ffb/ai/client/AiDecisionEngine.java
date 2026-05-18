@@ -76,6 +76,9 @@ public class AiDecisionEngine implements Runnable {
     private final boolean useRandom;
     private final Random random = new Random();
 
+    /** Optional MCTS search agent.  Null = use scripted policy only. */
+    private com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsSearch;
+
     private volatile boolean running = true;
     private IDialogParameter lastHandledDialog = null;
     private boolean loginAttempted = false;
@@ -96,6 +99,11 @@ public class AiDecisionEngine implements Runnable {
         this.gameName = "LocalGame";
         this.home = home;
         this.useRandom = useRandom;
+    }
+
+    /** Attach an MCTS search agent.  Must be called before the engine starts polling. */
+    public void setMctsSearch(com.fumbbl.ffb.ai.mcts.BbMctsSearch mctsSearch) {
+        this.mctsSearch = mctsSearch;
     }
 
     @Override
@@ -499,6 +507,19 @@ public class AiDecisionEngine implements Runnable {
     // ── SELECT_PLAYER ─────────────────────────────────────────────────────────────
 
     private void handleSelectPlayer(Game game) {
+        // MCTS path: use MCTS search to select the best activation.
+        if (mctsSearch != null) {
+            com.fumbbl.ffb.ai.mcts.BbAction best = mctsSearch.selectActivation(game, home);
+            if (best.isEndTurn()) {
+                client.getCommunication().sendEndTurn(game.getTurnMode());
+            } else {
+                movePolicy.reset();
+                client.getCommunication().sendActingPlayer(best.player, best.action, false);
+            }
+            return;
+        }
+
+        // Scripted policy path (default).
         MoveDecisionEngine.PlayerSelection sel = MoveDecisionEngine.selectPlayer(
             game, game.getTeamHome(), game.getTeamAway(), true, true, random, false);
 

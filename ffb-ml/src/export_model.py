@@ -151,6 +151,49 @@ def export_move_target(model: BCModel, out_path: Path):
     print(f"  Exported {out_path.name}")
 
 
+# ── Value-only export wrapper ─────────────────────────────────────────────────
+
+class ValueInferenceModel(nn.Module):
+    """
+    Exports only the value head: backbone → value_trunk → sigmoid(win_head).
+
+    Inputs:  spatial (B, N_CH, W, H), non_spatial (B, NS_DIM)
+    Output:  win_prob (B,) — win probability for the currently-acting team
+    """
+
+    def __init__(self, model: BCModel):
+        super().__init__()
+        self.backbone    = model.backbone
+        self.value_trunk = model.value_trunk
+        self.win_head    = model.win_head
+
+    def forward(self, spatial: torch.Tensor, non_spatial: torch.Tensor) -> torch.Tensor:
+        rep, _ = self.backbone(spatial, non_spatial)
+        v = self.value_trunk(rep)
+        return torch.sigmoid(self.win_head(v)).squeeze(-1)  # (B,)
+
+
+def export_value(model: BCModel, out_path: Path):
+    wrapper = ValueInferenceModel(model).eval()
+    spatial     = torch.zeros(1, N_BOARD_CHANNELS, BOARD_W, BOARD_H)
+    non_spatial = torch.zeros(1, NS_DIM)
+
+    torch.onnx.export(
+        wrapper,
+        (spatial, non_spatial),
+        str(out_path),
+        input_names=["spatial", "non_spatial"],
+        output_names=["win_prob"],
+        dynamic_axes={
+            "spatial":     {0: "batch"},
+            "non_spatial": {0: "batch"},
+            "win_prob":    {0: "batch"},
+        },
+        opset_version=18,
+    )
+    print(f"  Exported {out_path.name}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -158,6 +201,8 @@ def main():
     parser.add_argument("--checkpoint", default="ffb-ml/checkpoints/small_best.pt")
     parser.add_argument("--output",     default="ffb-ml/bc_model.onnx",
                         help="Base path; three files will be created with _dialog/player_select/move_target suffix")
+    parser.add_argument("--value", action="store_true",
+                        help="Export only the value head as <base>_value.onnx (for MCTS leaf eval)")
     args = parser.parse_args()
 
     ck_path = Path(args.checkpoint)
@@ -177,9 +222,12 @@ def main():
     base = Path(args.output).with_suffix("")
     print(f"Exporting {scale} model (n_skills={n_skills}, n_dialog={n_dialog_types})...")
 
-    export_dialog(model,        Path(str(base) + "_dialog.onnx"))
-    export_player_select(model, Path(str(base) + "_player_select.onnx"))
-    export_move_target(model,   Path(str(base) + "_move_target.onnx"))
+    if args.value:
+        export_value(model, Path(str(base) + "_value.onnx"))
+    else:
+        export_dialog(model,        Path(str(base) + "_dialog.onnx"))
+        export_player_select(model, Path(str(base) + "_player_select.onnx"))
+        export_move_target(model,   Path(str(base) + "_move_target.onnx"))
 
     print("\nDone. Load in Java with OrtSession.")
 

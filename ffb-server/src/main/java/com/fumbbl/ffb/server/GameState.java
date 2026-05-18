@@ -52,6 +52,41 @@ import java.util.stream.Collectors;
  */
 public class GameState implements IModelChangeObserver, IJsonSerializable {
 
+	/**
+	 * ThreadLocal flag: when {@code true}, {@link #startNextStep()} enforces a
+	 * recursion depth limit to abort infinite step-chain loops in MCTS
+	 * simulations.  Disabled by default so normal game flow is unaffected.
+	 * Call {@link #setStepDepthLimitEnabled(boolean)} to toggle per-thread.
+	 */
+	private static final ThreadLocal<Boolean> STEP_DEPTH_LIMIT_ENABLED =
+		ThreadLocal.withInitial(() -> Boolean.FALSE);
+
+	/** ThreadLocal recursion counter — used only when the limit is enabled. */
+	private static final ThreadLocal<int[]> START_NEXT_STEP_DEPTH =
+		ThreadLocal.withInitial(() -> new int[]{0});
+
+	/** Maximum recursive depth of {@link #startNextStep} before aborting (when limit is enabled). */
+	private static final int MAX_STEP_CHAIN_DEPTH = 200;
+
+	/**
+	 * Exception thrown when {@link #startNextStep} recursion exceeds
+	 * {@link #MAX_STEP_CHAIN_DEPTH} while the depth limit is enabled.
+	 * Caught by MCTS simulation code to abort a single iteration gracefully.
+	 */
+	public static class StepChainDepthLimitException extends RuntimeException {
+		public StepChainDepthLimitException() {
+			super("step chain depth limit exceeded (infinite loop guard)");
+		}
+	}
+
+	/**
+	 * Enable or disable the step-chain depth limit for the calling thread.
+	 * Enable before MCTS simulation iterations; disable after.
+	 */
+	public static void setStepDepthLimitEnabled(boolean enabled) {
+		STEP_DEPTH_LIMIT_ENABLED.set(enabled);
+	}
+
 	private Game fGame;
 	private final GameLog fGameLog;
 	private GameStatus fStatus;
@@ -209,10 +244,27 @@ public class GameState implements IModelChangeObserver, IJsonSerializable {
 	}
 
 	public void startNextStep() {
-		progressToNextStep();
-		if (fCurrentStep != null) {
-			getServer().getDebugLog().logCurrentStep(IServerLogLevel.DEBUG, this);
-			executeStep(StepExecutionMode.Start, null);
+		if (Boolean.TRUE.equals(STEP_DEPTH_LIMIT_ENABLED.get())) {
+			int[] depth = START_NEXT_STEP_DEPTH.get();
+			if (depth[0] >= MAX_STEP_CHAIN_DEPTH) {
+				throw new StepChainDepthLimitException();
+			}
+			depth[0]++;
+			try {
+				progressToNextStep();
+				if (fCurrentStep != null) {
+					getServer().getDebugLog().logCurrentStep(IServerLogLevel.DEBUG, this);
+					executeStep(StepExecutionMode.Start, null);
+				}
+			} finally {
+				depth[0]--;
+			}
+		} else {
+			progressToNextStep();
+			if (fCurrentStep != null) {
+				getServer().getDebugLog().logCurrentStep(IServerLogLevel.DEBUG, this);
+				executeStep(StepExecutionMode.Start, null);
+			}
 		}
 	}
 

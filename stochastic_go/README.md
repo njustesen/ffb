@@ -196,9 +196,58 @@ MCTS-FT is designed to extend to Blood Bowl with the following component changes
 
 ### Integration points in the ffb codebase
 
-- **`ffb-ai/.../AiDecisionEngine.java`** — replace `RandomStrategy` calls with MCTS-FT search result
-- **`ffb-ai/.../GameSimulator.java`** — extend with a `ServerStub` to drive cloned game states through the Step stack
-- **`ffb-common/.../net/commands/`** — command objects define the action space for the search tree
-- **`ffb-server/.../model/step/`** — turnover/failure steps in the step stack signal involuntary turn end
+The Blood Bowl MCTS agent is implemented in `ffb-ai/src/main/java/com/fumbbl/ffb/ai/mcts/`:
 
-The Blood Bowl implementation requires a Java port of the MCTS-FT algorithm (or a JNI/subprocess bridge to Python), plus a forward-simulation layer that executes game Steps on a cloned `GameState` without network I/O.
+- **`BbMctsSearch`** — flat UCB/PUCT multi-armed bandit over player activations, with scripted rollouts via `RolloutSetup` + `MatchRunner.runForActivations()`.
+- **`RolloutSetup`** — bootstraps a mid-game `GameState` by JSON-cloning the `Game` model and pushing the `Select` sequence.
+- **`AiDecisionEngine`** — now supports a nullable `BbMctsSearch` field; pass `-mcts-budget N` to `AiMain` to enable.
+- **`MatchRunner`** — extended with `AgentMode.MCTS_UNIFORM` and `AgentMode.MCTS_SCRIPTED`; pass `--mcts-budget N` for automated benchmarks.
+
+---
+
+## PUCT Action Prior
+
+Both the Python and Java implementations support an optional **PUCT action prior** that replaces
+plain UCB with the AlphaZero-style formula:
+
+```
+U(a) = Q(a) + C_PUCT × P(a) × sqrt(N) / (1 + n(a))
+```
+
+### Python (`mcts_ft.py`)
+
+Override `action_prior()` in your `GameInterface` subclass:
+
+```python
+def action_prior(self, state, player, actions):
+    """Return a list of floats (probs summing to 1) or None for UCB."""
+    probs = my_model.predict(state, actions)
+    return probs
+```
+
+The default implementation returns `None` (plain UCB). Priors are stored once per node at
+expansion time.
+
+### Java (`MctsSearch.java`)
+
+Implement `IActionPrior` and pass it to the constructor:
+
+```java
+IActionPrior prior = (stateHash, edgeIds, count) -> myModel.computePrior(stateHash, edgeIds, count);
+MctsSearch search = new MctsSearch(ctx, rng, prior);
+```
+
+Pass `null` (or use the no-arg constructor) for plain UCB.
+
+### Blood Bowl (`BbMctsSearch.java`)
+
+Use `ScriptedActionPrior` for a strong, free prior derived from the scripted agent:
+
+```java
+BbMctsSearch search = new BbMctsSearch(server, rolloutRunner, budget, rolloutActivations);
+search.setActionPrior(new ScriptedActionPrior());  // PUCT with scripted prior
+// or leave unset for plain UCB
+```
+
+`ScriptedActionPrior` computes `MoveDecisionEngine.selectPlayer()` raw scores and passes them
+through `PolicySampler.softmax(T=0.5)` to obtain the prior distribution.
